@@ -1,0 +1,189 @@
+---
+description: This rule is helpful when modifying Elixir or Phoenix application code, especially for organizing modules, contexts, schemas, integrations, and web logic, and for maintaining a clean and well-scoped lib/ directory structure.
+alwaysApply: false
+---
+
+# Elixir / Phoenix Architecture & Structure
+
+## Rule Priority
+
+This rule must be followed strictly.
+If it conflicts with a global rule, this rule takes precedence for this project.
+
+Architectural decisions should assume clean, small, well-factored Elixir functions as defined in the Clean Elixir Code Guidelines.
+
+---
+
+## Directory Structure
+
+- Keep domain logic in `lib/clockk/`.
+- Keep web-related logic in `lib/clockk_web/`.
+- Do not mix domain and web concerns.
+- Module names must mirror directory structure exactly.
+
+---
+
+## Modules
+
+- Each module must have a single, clear responsibility.
+- Keep modules lean and well-scoped.
+- Proactively split modules that grow too large.
+- Avoid “god modules” or generic dumping grounds.
+
+---
+
+## Context Design
+
+- Contexts represent real domain boundaries.
+- Do not add unrelated functionality to an existing context.
+- Create new contexts when responsibilities diverge.
+
+---
+
+## Functional Design
+
+- Decompose logic into small, private helper functions.
+- Use pipelines only when they improve readability.
+- Do not force pipelines at the expense of clarity.
+
+---
+
+## Ecto & Database
+
+### Schemas
+
+- Contain only fields, associations, and changesets.
+- Do not include business logic.
+
+### Queries
+
+- Keep complex queries out of schemas.
+- Isolate query logic when it becomes non-trivial.
+
+### Migrations
+
+- Keep migrations atomic and explicit.
+- Comment irreversible or non-obvious operations.
+
+---
+
+## Integrations & Webhooks
+
+- External integrations must live under a dedicated namespace.
+- Each integration should have:
+  - A client module
+  - A webhook handler module
+  - Supporting helpers
+- Controllers should only route payloads to integration logic.
+
+---
+
+## Testing
+
+- Add tests for new functionality.
+- Prefer unit tests for domain logic.
+- Keep test helpers clean and reusable.
+
+---
+
+---
+
+## Phoenix Framework Best Practices
+
+- Prefer Phoenix’s built-in conventions, helpers, and abstractions over custom implementations.
+- Do not re-implement functionality that Phoenix already provides through:
+
+  - Phoenix.Controller
+  - Phoenix.Router
+  - Phoenix.Contexts
+  - Ecto and changesets
+
+- Writing less code by leveraging the framework is preferred over writing more custom boilerplate.
+- Avoid unnecessary wrapper functions that simply duplicate Phoenix or Ecto behavior.
+
+This does NOT mean:
+
+- Automatically adding new dependencies
+- Installing libraries for trivial problems
+
+This DOES mean:
+
+- Fully understanding and using Phoenix and Ecto’s built-in tools before inventing alternatives.
+- Only introducing custom abstractions when the problem cannot be expressed cleanly using existing Phoenix patterns.
+
+---
+
+## Controllers
+
+- Controllers should follow standard Phoenix RESTful conventions:
+
+  - index
+  - show
+  - create
+  - update
+  - delete
+
+- Avoid defining custom controller helper functions (e.g. `do_update`, `handle_update`, `process_create`) when Phoenix already provides an idiomatic pattern.
+- Use Phoenix-provided helpers such as:
+  - action_fallback
+  - render/3
+  - put_status/2
+  - put_view/2
+  - json/2
+    instead of custom response-handling logic.
+
+Controllers should:
+
+- Accept params
+- Delegate to context functions
+- Render responses
+
+Controllers should NOT:
+
+- Contain business logic
+- Perform validation outside of changesets
+- Manage persistence details
+- Re-implement framework behavior
+
+---
+
+## Controller Smell Checklist (Required Review)
+
+When modifying or adding a controller, review for the following smells.
+If any are present, refactor before considering the work complete.
+
+- [ ] Controller defines custom workflow helpers (e.g. `do_update`, `handle_create`)
+- [ ] Controller performs business logic instead of delegating to a context
+- [ ] Controller manually handles success/error branching that could be handled via `action_fallback`
+- [ ] Controller builds or mutates Ecto changesets directly
+- [ ] Controller contains complex conditionals or multi-step logic
+- [ ] Controller returns inconsistent response shapes
+- [ ] Controller duplicates logic used by another controller
+- [ ] Controller logic could be expressed using standard Phoenix REST conventions
+
+If any checkbox is true:
+
+- Refactor to use Phoenix conventions
+- Move logic into a context
+- Reduce custom code in favor of framework-provided behavior
+
+---
+
+## Avoiding Reinvention
+
+- Before writing custom abstractions, ask:
+
+  - Does Phoenix already solve this?
+  - Does Ecto already model this?
+  - Is there an established Phoenix pattern for this problem?
+
+- Only introduce custom code when:
+  - The problem is domain-specific
+  - The framework does not already provide a clean solution
+  - The decision is intentional and justified
+
+---
+
+## Evaluation Rule
+
+If custom code duplicates behavior already provided by Phoenix or Ecto, refactor to use the framework unless there is a clear and documented reason not to.

@@ -1,0 +1,83 @@
+---
+description: This rule is helpful when writing or refactoring Elixir or Phoenix code, especially for improving function clarity, control flow, module cleanliness, and overall code readability.
+alwaysApply: false
+---
+
+# Clean Elixir Code Guidelines
+
+## Rule Priority
+
+This rule must be followed strictly for Elixir code.
+If it conflicts with another project rule, ask for clarification.
+
+---
+
+## Core Principles
+
+- Prefer readability and explicit intent over brevity.
+- Reduce nesting through pattern matching and early exits.
+- Keep functions small, predictable, and easy to reason about.
+
+---
+
+## Function Design
+
+- Use pattern matching in function heads whenever possible.
+- Prefer multiple function clauses over conditionals.
+- Keep public functions expressive and business-oriented.
+- Extract private helper functions aggressively.
+
+---
+
+## Control Flow
+
+- Use `with` for sequences of dependent operations that may fail.
+- Use pipelines for data transformation, not error handling.
+- Avoid deeply nested `case`, `if`, or `cond` blocks.
+
+---
+
+## Validation & Boundaries
+
+- Validate inputs at the edges of the system.
+- Assume validated input inside core logic.
+- Do not mix validation logic with business logic.
+
+---
+
+## Return Shapes
+
+- Prefer consistent return values:
+  - `{:ok, result}`
+  - `{:error, reason}`
+- Avoid bare `nil` as a sole return type, mixed tuple/non-tuple returns, or exceptions for control flow. Use `{:ok, nil}` for operations with no meaningful return value.
+
+---
+
+## Module Size & Scope
+
+- Keep modules short enough to understand without scrolling excessively.
+- Split modules when responsibilities diverge.
+- Avoid generic utility modules.
+
+---
+
+## Naming
+
+- Use names that describe intent, not implementation.
+- Avoid boolean-heavy APIs.
+- Prefer domain language in public function names.
+
+---
+
+## Clean Elixir Checklist (Required Before Finishing)
+
+Before considering a task complete, confirm:
+
+- [ ] Functions use pattern matching where appropriate
+- [ ] Control flow avoids deep nesting
+- [ ] `with` is used for multi-step failure-prone logic
+- [ ] Pipelines are not abused for error handling
+- [ ] Functions are small and single-purpose
+- [ ] Return shapes are explicit and consistent
+- [ ] Modules remain lean and well-scoped
