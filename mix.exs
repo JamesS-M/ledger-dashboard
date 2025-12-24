@@ -44,7 +44,8 @@ defmodule LedgerDashboard.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
-      {:esbuild, "~> 0.7", runtime: Mix.env() == :dev}
+      {:esbuild, "~> 0.7", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.2", runtime: Mix.env() == :dev}
     ]
   end
 
@@ -58,8 +59,12 @@ defmodule LedgerDashboard.MixProject do
     [
       setup: ["deps.get", "assets.setup", "assets.build"],
       "assets.setup": ["deps.get", "cmd npm install --prefix assets"],
-      "assets.build": ["esbuild default"],
-      "assets.deploy": ["esbuild default --minify", "phx.digest"]
+      "assets.build": ["tailwind default", "esbuild default"],
+      "assets.deploy": [
+        "tailwind default --minify",
+        "esbuild default --minify",
+        "phx.digest"
+      ]
     ]
   end
 end
