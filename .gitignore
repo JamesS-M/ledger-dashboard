@@ -26,3 +26,7 @@ erl_crash.dump
 ledger_dashboard-*.tar
 
 assets/node_modules/
+
+# Generated build artifacts
+priv/static/assets/app.css
+priv/static/assets/app.js
