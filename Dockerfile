@@ -49,6 +49,7 @@ RUN apt-get update && \
     apt-get install -y \
       ca-certificates \
       hledger \
+      libgmp10 \
       libssl3 \
       openssl && \
     apt-get clean && \
