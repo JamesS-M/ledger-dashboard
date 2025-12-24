@@ -1,26 +1,21 @@
 defmodule LedgerDashboard.Ledger.Runner do
   @moduledoc """
-  Executes ledger-cli or hledger commands and returns parsed results.
+  Executes hledger commands and returns parsed results.
 
-  Prefers hledger (better JSON support), falls back to ledger.
+  Uses hledger for all ledger operations (better JSON support).
   Handles command execution, timeouts, and error cases.
   """
 
   @timeout 5_000
 
   @doc """
-  Executes balance command on the given file.
+  Executes balance command on the given file using hledger.
 
-  Tries hledger first (with JSON output), then falls back to ledger.
   Returns `{:ok, output_string}` on success or `{:error, reason}` on failure.
   Output may be JSON (if supported) or text format.
   """
   def run_balance(file_path) when is_binary(file_path) do
-    # Try hledger first (better JSON support)
-    case try_hledger_balance(file_path) do
-      {:ok, output} -> {:ok, output}
-      {:error, _} -> try_ledger_balance(file_path)
-    end
+    try_hledger_balance(file_path)
   end
 
   defp try_hledger_balance(file_path) do
@@ -41,54 +36,6 @@ defmodule LedgerDashboard.Ledger.Runner do
     end
   end
 
-  defp try_ledger_balance(file_path) do
-    case try_json_flags(file_path, ["bal"]) do
-      {:ok, output} -> {:ok, output}
-      {:error, _} -> try_json_flags(file_path, ["balance"])
-    end
-  end
-
-  defp try_json_flags(file_path, base_args) do
-    json_flags = [
-      ["--json"],
-      ["-j"],
-      ["--format", "json"]
-    ]
-
-    result =
-      Enum.reduce_while(json_flags, nil, fn json_flag, _acc ->
-        case execute_command("ledger", file_path, base_args ++ json_flag) do
-          {:ok, output} ->
-            trimmed = String.trim(output)
-
-            if String.starts_with?(trimmed, "[") or String.starts_with?(trimmed, "{") do
-              {:halt, {:ok, output}}
-            else
-              {:cont, :next}
-            end
-
-          {:error, reason} ->
-            if String.contains?(reason, "Illegal option") or
-                 String.contains?(reason, "unknown option") do
-              {:cont, :next}
-            else
-              {:halt, {:error, reason}}
-            end
-        end
-      end)
-
-    case result do
-      {:ok, output} ->
-        {:ok, output}
-
-      {:error, reason} ->
-        {:error, reason}
-
-      _ ->
-        execute_command("ledger", file_path, base_args)
-    end
-  end
-
   @doc """
   Executes register command on the given file.
 
@@ -97,7 +44,7 @@ defmodule LedgerDashboard.Ledger.Runner do
   Reserved for future use.
   """
   def run_register(file_path) when is_binary(file_path) do
-    # Try hledger first with JSON output
+    # Try hledger with JSON output first
     # Use --all to show all postings, not just one per transaction
     case execute_command("hledger", file_path, ["register", "--all", "-O", "json"]) do
       {:ok, output} ->
@@ -112,22 +59,7 @@ defmodule LedgerDashboard.Ledger.Runner do
 
       {:error, _} ->
         # Fallback to text format with --all
-        case execute_command("hledger", file_path, ["register", "--all"]) do
-          {:ok, output} ->
-            {:ok, output}
-
-          {:error, _} ->
-            # Try ledger with custom format
-            # Use display_amount instead of display_total to get the transaction amount, not running balance
-            case execute_command("ledger", file_path, [
-                   "reg",
-                   "--format",
-                   "%(format_date(date, \"%Y-%m-%d\"))|%(account)|%(display_amount)\n"
-                 ]) do
-              {:ok, output} -> {:ok, output}
-              {:error, _} -> execute_command("ledger", file_path, ["reg"])
-            end
-        end
+        execute_command("hledger", file_path, ["register", "--all"])
     end
   end
 
@@ -137,7 +69,22 @@ defmodule LedgerDashboard.Ledger.Runner do
 
     task =
       Task.async(fn ->
-        System.cmd(command, args, stderr_to_stdout: true)
+        try do
+          System.cmd(command, args, stderr_to_stdout: true)
+        rescue
+          e ->
+            # System.cmd raises when command is not found
+            case e do
+              %ErlangError{original: :enoent} ->
+                {:error, :enoent}
+
+              _ ->
+                {:error, Exception.message(e)}
+            end
+        catch
+          :exit, reason ->
+            {:error, reason}
+        end
       end)
 
     case Task.yield(task, @timeout) || Task.shutdown(task) do
