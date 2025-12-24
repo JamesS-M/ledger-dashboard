@@ -8,6 +8,8 @@ defmodule LedgerDashboard.Ledger.Analyzer do
 
   alias LedgerDashboard.Ledger.{AnalysisResult, Runner, Parser, Upload}
 
+  require Logger
+
   @doc """
   Analyzes a ledger file and returns financial summary.
 
@@ -23,8 +25,6 @@ defmodule LedgerDashboard.Ledger.Analyzer do
           {:ok, register_output} ->
             case Parser.parse_register(register_output) do
               {:ok, parsed_transactions} ->
-                require Logger
-
                 Logger.info(
                   "Analyzer: Extracted #{length(parsed_transactions)} transactions from register"
                 )
@@ -38,13 +38,11 @@ defmodule LedgerDashboard.Ledger.Analyzer do
                 parsed_transactions
 
               {:error, error} ->
-                require Logger
                 Logger.warning("Analyzer: Failed to parse register output: #{inspect(error)}")
                 []
             end
 
           {:error, error} ->
-            require Logger
             Logger.warning("Analyzer: Failed to run register command: #{inspect(error)}")
             []
         end

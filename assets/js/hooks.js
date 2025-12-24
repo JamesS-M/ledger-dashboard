@@ -45,16 +45,12 @@ function handleBrushSelection(params, hook, transactions, dates) {
 // Helper function to update sunburst charts with filtered transactions
 function updateSunburstCharts(sunburstIds, filteredTransactions) {
   if (!sunburstIds || sunburstIds.length === 0) {
-    console.log("updateSunburstCharts: No sunburst IDs provided")
     return
   }
-  
-  console.log(`updateSunburstCharts: Updating ${sunburstIds.length} charts with ${filteredTransactions ? filteredTransactions.length : 0} transactions`)
   
   sunburstIds.forEach(sunburstId => {
     const registryEntry = chartRegistry.get(sunburstId)
     if (!registryEntry || !registryEntry.chart) {
-      console.warn(`updateSunburstCharts: No registry entry for ${sunburstId}`)
       return
     }
     
@@ -63,24 +59,19 @@ function updateSunburstCharts(sunburstIds, filteredTransactions) {
       // Show all data - restore original
       const originalData = registryEntry.originalData || registryEntry.data
       treeData = originalData.tree
-      console.log(`Restoring original data for ${sunburstId}:`, treeData)
     } else {
       // Recalculate from filtered transactions
-      console.log(`Calculating tree for ${sunburstId} from ${filteredTransactions.length} transactions`)
       if (sunburstId === "expense-breakdown") {
         treeData = calculateExpenseTree(filteredTransactions)
       } else if (sunburstId === "income-breakdown") {
         treeData = calculateIncomeTree(filteredTransactions)
       } else {
-        console.warn(`Unknown sunburst ID: ${sunburstId}`)
         return
       }
-      console.log(`Calculated tree for ${sunburstId}:`, treeData)
       
       // If the filtered tree is empty (no data for this type in this period),
       // restore the original data instead of showing blank
       if (treeData && treeData.value === 0 && (!treeData.children || treeData.children.length === 0)) {
-        console.log(`No data for ${sunburstId} in filtered period, restoring original`)
         const originalData = registryEntry.originalData || registryEntry.data
         treeData = originalData.tree
       }
@@ -88,7 +79,6 @@ function updateSunburstCharts(sunburstIds, filteredTransactions) {
     
     // Ensure treeData is valid
     if (!treeData || !treeData.name) {
-      console.warn(`Invalid treeData for ${sunburstId}:`, treeData)
       // Use empty tree instead
       treeData = {
         name: sunburstId.includes("expense") ? "Expenses" : "Income",
@@ -119,11 +109,6 @@ function updateSunburstCharts(sunburstIds, filteredTransactions) {
       series: [updatedSeries]
     }
     
-    console.log(`Updating chart ${sunburstId} with treeData value: ${treeData.value}, children: ${treeData.children ? treeData.children.length : 0}`)
-    if (treeData.children && treeData.children.length > 0) {
-      console.log(`First child:`, treeData.children[0])
-    }
-    
     // Use notMerge: false to allow ECharts to merge and animate
     // The series id ensures ECharts matches the correct series for animation
     registryEntry.chart.setOption(option, { 
@@ -139,17 +124,11 @@ function calculateExpenseTree(transactions) {
     return { name: "Expenses", value: 0, children: [] }
   }
   
-  console.log("calculateExpenseTree: Sample transaction:", transactions[0])
-  
   const expenseTransactions = transactions.filter(t => 
     t && t.account && t.account.startsWith("Expenses")
   )
   
-  console.log(`calculateExpenseTree: Found ${expenseTransactions.length} expense transactions out of ${transactions.length} total`)
-  
   if (expenseTransactions.length === 0) {
-    console.log("calculateExpenseTree: No expense transactions found. Sample accounts:", 
-      transactions.slice(0, 5).map(t => t.account))
     return { name: "Expenses", value: 0, children: [] }
   }
   
@@ -167,19 +146,14 @@ function calculateExpenseTree(transactions) {
         const current = categoryMap.get(categoryPath) || 0
         categoryMap.set(categoryPath, current + amount)
       }
-    } else {
-      console.log("calculateExpenseTree: Skipping transaction:", { account, amount, hasColon: account && account.includes(":") })
     }
   })
-  
-  console.log(`calculateExpenseTree: Category map has ${categoryMap.size} entries:`, Array.from(categoryMap.entries()).slice(0, 5))
   
   if (categoryMap.size === 0) {
     return { name: "Expenses", value: 0, children: [] }
   }
   
   const tree = buildHierarchyTree(categoryMap, "Expenses")
-  console.log("calculateExpenseTree: Built tree:", tree)
   return tree
 }
 
@@ -189,17 +163,11 @@ function calculateIncomeTree(transactions) {
     return { name: "Income", value: 0, children: [] }
   }
   
-  console.log("calculateIncomeTree: Sample transaction:", transactions[0])
-  
   const incomeTransactions = transactions.filter(t => 
     t && t.account && t.account.startsWith("Income")
   )
   
-  console.log(`calculateIncomeTree: Found ${incomeTransactions.length} income transactions out of ${transactions.length} total`)
-  
   if (incomeTransactions.length === 0) {
-    console.log("calculateIncomeTree: No income transactions found. Sample accounts:", 
-      transactions.slice(0, 5).map(t => t.account))
     return { name: "Income", value: 0, children: [] }
   }
   
@@ -217,19 +185,14 @@ function calculateIncomeTree(transactions) {
         const current = categoryMap.get(categoryPath) || 0
         categoryMap.set(categoryPath, current + amount)
       }
-    } else {
-      console.log("calculateIncomeTree: Skipping transaction:", { account, amount, hasColon: account && account.includes(":") })
     }
   })
-  
-  console.log(`calculateIncomeTree: Category map has ${categoryMap.size} entries:`, Array.from(categoryMap.entries()).slice(0, 5))
   
   if (categoryMap.size === 0) {
     return { name: "Income", value: 0, children: [] }
   }
   
   const tree = buildHierarchyTree(categoryMap, "Income")
-  console.log("calculateIncomeTree: Built tree:", tree)
   return tree
 }
 
@@ -243,7 +206,12 @@ function buildHierarchyTree(categoryMap, rootName) {
     
     parts.forEach((part, index) => {
       if (!current[part]) {
-        current[part] = index === parts.length - 1 ? amount : {}
+        // Create new node - if it's the final leaf, set amount directly, otherwise create object
+        if (index === parts.length - 1) {
+          current[part] = amount
+        } else {
+          current[part] = {}
+        }
       } else if (index === parts.length - 1) {
         // Leaf node - add to existing value
         if (typeof current[part] === "number") {
@@ -251,8 +219,15 @@ function buildHierarchyTree(categoryMap, rootName) {
         } else {
           current[part]._value = (current[part]._value || 0) + amount
         }
+      } else {
+        // Intermediate node - if current[part] is a number, preserve it as _value
+        if (typeof current[part] === "number") {
+          current[part] = { _value: current[part] }
+        }
       }
-      current = typeof current[part] === "object" ? current[part] : {}
+      
+      // Descend into the node (now guaranteed to be an object)
+      current = current[part]
     })
   })
   
@@ -317,6 +292,7 @@ export const ChartHook = {
 
     const container = this.el.querySelector(".chart-container")
     if (!container) {
+      // Keep this error as it indicates a critical initialization failure
       console.error("Chart container not found")
       return
     }
@@ -340,7 +316,6 @@ export const ChartHook = {
   initializeChart(container, chartType, chartData) {
     // Double-check dimensions before initializing
     if (container.clientWidth === 0 || container.clientHeight === 0) {
-      console.warn("Chart container has no dimensions, retrying...")
       setTimeout(() => {
         this.initializeChart(container, chartType, chartData)
       }, 50)
@@ -452,6 +427,12 @@ export const ChartHook = {
   },
 
   destroyed() {
+    // Clear any pending event handler timeout
+    if (this.eventHandlerTimeout) {
+      clearTimeout(this.eventHandlerTimeout)
+      this.eventHandlerTimeout = null
+    }
+    
     if (this.handleResize) {
       window.removeEventListener("resize", this.handleResize)
     }
@@ -839,7 +820,12 @@ export const ChartHook = {
       
       // Add brush selection and hover event handlers
       if (hook && hook.linkedSunburstIds && hook.linkedSunburstIds.length > 0) {
-        setTimeout(() => {
+        hook.eventHandlerTimeout = setTimeout(() => {
+          // Guard against chart being destroyed before timeout fires
+          if (!hook.chart || hook.chart.isDisposed()) {
+            return
+          }
+          
           // Track brush state
           hook.hasActiveBrush = false
           
@@ -866,14 +852,6 @@ export const ChartHook = {
               const monthIndex = Math.round(xAxisInfo.value)
               const hoverMonth = dates[monthIndex]
               
-              console.log("updateAxisPointer:", {
-                value: xAxisInfo.value,
-                monthIndex,
-                hoverMonth,
-                totalDates: dates.length,
-                totalTransactions: transactions.length
-              })
-              
               if (hoverMonth) {
                 // Filter transactions to this specific month
                 const filteredTransactions = transactions.filter(t => {
@@ -894,16 +872,6 @@ export const ChartHook = {
                   
                   return false
                 })
-                
-                console.log(`Filtered to ${filteredTransactions.length} transactions for month ${hoverMonth}`)
-                if (filteredTransactions.length > 0) {
-                  console.log("Sample filtered transaction:", filteredTransactions[0])
-                } else {
-                  console.log("Sample original transaction:", transactions[0])
-                  console.log("Available months in transactions:", 
-                    [...new Set(transactions.map(t => t.month || (t.date ? t.date.substring(0, 7) : null)))]
-                  )
-                }
                 
                 updateSunburstCharts(hook.linkedSunburstIds, filteredTransactions)
               }
