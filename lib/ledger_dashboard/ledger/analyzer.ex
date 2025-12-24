@@ -37,11 +37,15 @@ defmodule LedgerDashboard.Ledger.Analyzer do
                 Logger.info("Analyzer: Found #{income_count} income transactions")
                 parsed_transactions
 
-              {:error, _} ->
+              {:error, error} ->
+                require Logger
+                Logger.warning("Analyzer: Failed to parse register output: #{inspect(error)}")
                 []
             end
 
-          {:error, _} ->
+          {:error, error} ->
+            require Logger
+            Logger.warning("Analyzer: Failed to run register command: #{inspect(error)}")
             []
         end
 

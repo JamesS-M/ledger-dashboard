@@ -38,7 +38,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           Financial summary from your ledger file
         </p>
       </div>
-      
+
     <!-- Summary Cards Row - Mobile: 1 col, Tablet: 3 cols -->
       <div class="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:gap-8">
         <.summary_card
@@ -54,21 +54,36 @@ defmodule LedgerDashboardWeb.DashboardLive do
           value={format_number(@analysis_result.summary.net_worth)}
         />
       </div>
-      
+
     <!-- Sunburst Charts Row - Mobile: 1 col, Desktop: 2 cols -->
       <div class="grid grid-cols-1 gap-6 sm:gap-8 lg:grid-cols-2">
         <.chart_card
           title="Expense Breakdown"
           chart_type="sunburst"
+          chart_id="expense-breakdown"
           chart_data={expense_chart_data(@analysis_result.summary.expense_categories)}
+          linked_chart_id="category-trends-over-time"
         />
         <.chart_card
           title="Income Breakdown"
           chart_type="sunburst"
+          chart_id="income-breakdown"
           chart_data={income_chart_data(@analysis_result.summary.income_categories)}
+          linked_chart_id="category-trends-over-time"
         />
       </div>
-      
+
+    <!-- Category Trends Line Chart - Full width -->
+      <div class="col-span-1">
+        <.chart_card
+          title="Category Trends Over Time"
+          chart_type="category_lines"
+          chart_id="category-trends-over-time"
+          chart_data={category_trends_chart_data(@analysis_result.summary)}
+          linked_sunburst_ids={["expense-breakdown", "income-breakdown"]}
+        />
+      </div>
+
     <!-- Trends Over Time Line Chart - Full width -->
       <div class="col-span-1">
         <.chart_card
@@ -77,7 +92,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           chart_data={trends_chart_data(@analysis_result.summary)}
         />
       </div>
-      
+
     <!-- Income vs Expenses by Month Stacked Bar - Full width -->
       <div class="col-span-1">
         <.chart_card
@@ -86,7 +101,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           chart_data={monthly_comparison_chart_data(@analysis_result.summary)}
         />
       </div>
-      
+
     <!-- Asset / Liability Flow Treemap - Full width -->
       <div class="col-span-1">
         <.chart_card
@@ -95,7 +110,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           chart_data={asset_liability_flow_chart_data(@analysis_result.summary)}
         />
       </div>
-      
+
     <!-- Back link -->
       <div class="col-span-1">
         <.link
@@ -135,9 +150,11 @@ defmodule LedgerDashboardWeb.DashboardLive do
   defp format_number(_value), do: "0"
 
   defp chart_card(assigns) do
-    chart_id = "chart-#{String.replace(assigns.title, " ", "-") |> String.downcase()}"
+    chart_id = assigns[:chart_id] || "chart-#{String.replace(assigns.title, " ", "-") |> String.downcase()}"
     # Different heights for different chart types
     height_class = get_chart_height(assigns.chart_type)
+    linked_chart_id = assigns[:linked_chart_id]
+    linked_sunburst_ids = assigns[:linked_sunburst_ids] || []
 
     ~H"""
     <div class="overflow-hidden rounded-xl bg-white shadow-sm">
@@ -148,6 +165,8 @@ defmodule LedgerDashboardWeb.DashboardLive do
           phx-hook="Chart"
           data-chart-type={@chart_type}
           data-chart-data={Jason.encode!(@chart_data)}
+          data-linked-chart-id={if linked_chart_id, do: linked_chart_id, else: ""}
+          data-linked-sunburst-ids={if linked_sunburst_ids != [], do: Jason.encode!(linked_sunburst_ids), else: ""}
           class={["w-full", height_class]}
         >
           <div
@@ -163,6 +182,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
 
   defp get_chart_height("sunburst"), do: "h-64 sm:h-80"
   defp get_chart_height("line"), do: "h-72 sm:h-80 lg:h-96"
+  defp get_chart_height("category_lines"), do: "h-80 sm:h-96 lg:h-[28rem]"
   defp get_chart_height("stacked_bar"), do: "h-72 sm:h-80 lg:h-96"
   defp get_chart_height("treemap"), do: "h-80 sm:h-96 lg:h-[28rem]"
   defp get_chart_height(_), do: "h-64 sm:h-80"
@@ -468,4 +488,89 @@ defmodule LedgerDashboardWeb.DashboardLive do
   end
 
   defp build_asset_liability_tree(_value, _name), do: %{name: "No Data", value: 0}
+
+  defp category_trends_chart_data(summary) do
+    require Logger
+    transactions = summary.transactions || []
+    Logger.info("category_trends_chart_data: #{length(transactions)} transactions")
+
+    if Enum.empty?(transactions) do
+      Logger.warning("No transactions available for category trends chart")
+      %{dates: [], categories: [], series: [], transactions: []}
+    else
+      # Group transactions by month
+      monthly_data =
+        transactions
+        |> Enum.group_by(fn t -> {t.date.year, t.date.month} end)
+        |> Enum.map(fn {{year, month}, month_transactions} ->
+          # Group by category (extract category from account path)
+          category_data =
+            month_transactions
+            |> Enum.group_by(fn t ->
+              # Extract category from account path (e.g., "Expenses:Food:Groceries" -> "Food:Groceries")
+              account = t.account
+
+              if String.contains?(account, ":") do
+                account
+                |> String.split(":")
+                |> Enum.drop(1)
+                |> Enum.join(":")
+              else
+                # Fallback: use account name without prefix
+                String.replace_prefix(account, "Expenses", "")
+                |> String.replace_prefix("Income", "")
+              end
+            end)
+            |> Enum.map(fn {category, cat_transactions} ->
+              total = Enum.map(cat_transactions, &abs(&1.amount)) |> Enum.sum()
+              {category, total}
+            end)
+            |> Enum.into(%{})
+
+          month_label = "#{year}-#{String.pad_leading(Integer.to_string(month), 2, "0")}"
+          {month_label, category_data}
+        end)
+        |> Enum.sort_by(fn {month_label, _} -> month_label end)
+
+      # Get all unique categories across all months
+      all_categories =
+        monthly_data
+        |> Enum.flat_map(fn {_month, cat_data} -> Map.keys(cat_data) end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      # Build series data for each category
+      months = Enum.map(monthly_data, fn {month, _} -> month end)
+
+      series =
+        Enum.map(all_categories, fn category ->
+          values =
+            Enum.map(monthly_data, fn {_month, cat_data} ->
+              Map.get(cat_data, category, 0)
+            end)
+
+          %{name: category, data: values}
+        end)
+
+      # Include all transactions for filtering by date range
+      # Keep original date format for filtering, but also include month for grouping
+      all_transactions =
+        Enum.map(transactions, fn t ->
+          month_label = "#{t.date.year}-#{String.pad_leading(Integer.to_string(t.date.month), 2, "0")}"
+          %{
+            date: Date.to_string(t.date),
+            month: month_label,
+            account: t.account,
+            amount: t.amount
+          }
+        end)
+
+      %{
+        dates: months,
+        categories: all_categories,
+        series: series,
+        transactions: all_transactions
+      }
+    end
+  end
 end

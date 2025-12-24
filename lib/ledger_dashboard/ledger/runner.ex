@@ -44,22 +44,33 @@ defmodule LedgerDashboard.Ledger.Runner do
   Reserved for future use.
   """
   def run_register(file_path) when is_binary(file_path) do
+    require Logger
+    Logger.info("Runner: Running register command for file: #{file_path}")
+
     # Try hledger with JSON output first
-    # Use --all to show all postings, not just one per transaction
-    case execute_command("hledger", file_path, ["register", "--all", "-O", "json"]) do
+    # Note: hledger register shows all postings by default (unlike ledger which needs --all)
+    case execute_command("hledger", file_path, ["register", "-O", "json"]) do
       {:ok, output} ->
         trimmed = String.trim(output)
+        Logger.info("Runner: Register command returned #{String.length(trimmed)} characters")
+
         # Verify it's actually JSON
         if String.starts_with?(trimmed, "[") or String.starts_with?(trimmed, "{") do
+          Logger.info("Runner: Register output is valid JSON")
           {:ok, output}
         else
-          # Not JSON, try text format with --all
-          execute_command("hledger", file_path, ["register", "--all"])
+          Logger.info("Runner: Register output is not JSON, trying text format")
+          # Not JSON, try text format
+          execute_command("hledger", file_path, ["register"])
         end
 
-      {:error, _} ->
-        # Fallback to text format with --all
-        execute_command("hledger", file_path, ["register", "--all"])
+      {:error, error} ->
+        Logger.warning(
+          "Runner: Register JSON command failed: #{inspect(error)}, trying text format"
+        )
+
+        # Fallback to text format
+        execute_command("hledger", file_path, ["register"])
     end
   end
 
