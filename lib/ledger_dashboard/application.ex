@@ -11,6 +11,7 @@ defmodule LedgerDashboard.Application do
       LedgerDashboardWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:ledger_dashboard, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: LedgerDashboard.PubSub},
+      LedgerDashboard.Ledger.Storage,
       # Start a worker by calling: LedgerDashboard.Worker.start_link(arg)
       # {LedgerDashboard.Worker, arg},
       # Start to serve requests, typically the last entry

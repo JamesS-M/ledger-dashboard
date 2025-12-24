@@ -25,3 +25,4 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 ledger_dashboard-*.tar
 
+assets/node_modules/

@@ -1,0 +1,470 @@
+defmodule LedgerDashboardWeb.DashboardLive do
+  @moduledoc """
+  LiveView for displaying ledger analysis results in a dashboard.
+  """
+  use LedgerDashboardWeb, :live_view
+
+  alias LedgerDashboard.Ledger.{AnalysisResult, Storage}
+  alias Jason
+
+  @impl true
+  def mount(_params, session, socket) do
+    session_id = Map.get(session, "_csrf_token", inspect(self()))
+    analysis_result = Storage.get(session_id)
+
+    case analysis_result do
+      %AnalysisResult{} = result ->
+        Storage.delete(session_id)
+        {:ok, assign(socket, :analysis_result, result)}
+
+      _ ->
+        {:ok,
+         socket
+         |> put_flash(:error, "No analysis result found. Please upload a ledger file first.")
+         |> redirect(to: ~p"/")}
+    end
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
+          Ledger Dashboard
+        </h1>
+        <p class="mt-2 text-lg leading-8 text-zinc-600">
+          Financial summary from your ledger file
+        </p>
+      </div>
+      
+    <!-- Summary Cards Row -->
+      <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+        <.summary_card
+          label="Total Expenses"
+          value={format_number(@analysis_result.summary.total_expenses)}
+        />
+        <.summary_card
+          label="Total Income"
+          value={format_number(@analysis_result.summary.total_income)}
+        />
+        <.summary_card
+          label="Net Worth"
+          value={format_number(@analysis_result.summary.net_worth)}
+        />
+      </div>
+      
+    <!-- Sunburst Charts Row -->
+      <div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <.chart_card
+          title="Expense Breakdown"
+          chart_type="sunburst"
+          chart_data={expense_chart_data(@analysis_result.summary.expense_categories)}
+        />
+        <.chart_card
+          title="Income Breakdown"
+          chart_type="sunburst"
+          chart_data={income_chart_data(@analysis_result.summary.income_categories)}
+        />
+      </div>
+      
+    <!-- Trends Over Time Line Chart -->
+      <div class="mt-8">
+        <.chart_card
+          title="Trends Over Time"
+          chart_type="line"
+          chart_data={trends_chart_data(@analysis_result.summary)}
+        />
+      </div>
+      
+    <!-- Income vs Expenses by Month Stacked Bar -->
+      <div class="mt-8">
+        <.chart_card
+          title="Income vs Expenses by Month"
+          chart_type="stacked_bar"
+          chart_data={monthly_comparison_chart_data(@analysis_result.summary)}
+        />
+      </div>
+      
+    <!-- Asset / Liability Flow Treemap -->
+      <div class="mt-8">
+        <.chart_card
+          title="Asset / Liability Flow"
+          chart_type="treemap"
+          chart_data={asset_liability_flow_chart_data(@analysis_result.summary)}
+        />
+      </div>
+
+      <div class="mt-8">
+        <.link
+          navigate={~p"/"}
+          class="text-sm font-semibold leading-6 text-zinc-900 hover:text-zinc-700"
+        >
+          ← Upload another file
+        </.link>
+      </div>
+    </div>
+    """
+  end
+
+  defp summary_card(assigns) do
+    ~H"""
+    <div class="overflow-hidden rounded-lg bg-white shadow">
+      <div class="p-5">
+        <div class="flex items-center">
+          <div class="flex-shrink-0"></div>
+          <div class="ml-5 w-0 flex-1">
+            <dl>
+              <dt class="text-sm font-medium text-zinc-500 truncate">
+                {@label}
+              </dt>
+              <dd class="mt-1 text-3xl font-semibold text-zinc-900">
+                {@value}
+              </dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp format_number(nil), do: "0"
+
+  defp format_number(value) when is_number(value) do
+    :erlang.float_to_binary(value / 1.0, [{:decimals, 2}, :compact])
+  end
+
+  defp format_number(_value), do: "0"
+
+  defp chart_card(assigns) do
+    chart_id = "chart-#{String.replace(assigns.title, " ", "-") |> String.downcase()}"
+    # Different heights for different chart types
+    height_class = get_chart_height(assigns.chart_type)
+
+    ~H"""
+    <div class="overflow-hidden rounded-lg bg-white shadow">
+      <div class="p-5">
+        <h3 class="text-lg font-medium text-zinc-900 mb-4">{@title}</h3>
+        <div
+          id={chart_id}
+          phx-hook="Chart"
+          data-chart-type={@chart_type}
+          data-chart-data={Jason.encode!(@chart_data)}
+          class={["w-full", height_class]}
+        >
+          <div class="chart-container w-full h-full" style="min-height: 256px;"></div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp get_chart_height("sunburst"), do: "h-64"
+  defp get_chart_height("line"), do: "h-80"
+  defp get_chart_height("stacked_bar"), do: "h-80"
+  defp get_chart_height("treemap"), do: "h-96"
+  defp get_chart_height(_), do: "h-64"
+
+  defp expense_chart_data(expense_categories) when is_list(expense_categories) do
+    # Build hierarchical tree structure for sunburst chart
+    tree = build_expense_hierarchy(expense_categories)
+    %{tree: tree}
+  end
+
+  defp expense_chart_data(_), do: %{tree: %{name: "Expenses", value: 0, children: []}}
+
+  defp income_chart_data(income_categories) when is_list(income_categories) do
+    # Build hierarchical tree structure for sunburst chart
+    tree = build_income_hierarchy(income_categories)
+    %{tree: tree}
+  end
+
+  defp income_chart_data(_), do: %{tree: %{name: "Income", value: 0, children: []}}
+
+  defp build_expense_hierarchy(categories) do
+    # Build a tree from flat categories like "Expenses:Food:Groceries" -> {Food: {Groceries: amount}}
+    tree = %{}
+
+    tree =
+      Enum.reduce(categories, tree, fn %{full_path: path, amount: amount}, acc ->
+        parts = String.split(path, ":") |> Enum.drop(1)
+
+        if Enum.empty?(parts) do
+          acc
+        else
+          insert_category(acc, parts, amount)
+        end
+      end)
+
+    # Convert to sunburst format: {name, value, children: [...]}
+    convert_to_sunburst(tree, "Expenses")
+  end
+
+  defp build_income_hierarchy(categories) do
+    # Build a tree from flat categories like "Income:Salary:Base" -> {Salary: {Base: amount}}
+    tree = %{}
+
+    tree =
+      Enum.reduce(categories, tree, fn %{full_path: path, amount: amount}, acc ->
+        parts = String.split(path, ":") |> Enum.drop(1)
+
+        if Enum.empty?(parts) do
+          acc
+        else
+          insert_category(acc, parts, amount)
+        end
+      end)
+
+    # Convert to sunburst format: {name, value, children: [...]}
+    convert_to_sunburst(tree, "Income")
+  end
+
+  defp insert_category(tree, [leaf], amount) do
+    # Leaf node - store as {name: amount} in a special format
+    current = Map.get(tree, leaf, 0)
+
+    if is_number(current) do
+      Map.put(tree, leaf, current + amount)
+    else
+      # Already has children, add to value
+      Map.update(tree, leaf, amount, fn existing ->
+        if is_map(existing) do
+          Map.update(existing, :_value, amount, &(&1 + amount))
+        else
+          amount
+        end
+      end)
+    end
+  end
+
+  defp insert_category(tree, [parent | rest], amount) do
+    current = Map.get(tree, parent, %{})
+
+    updated_children =
+      if is_map(current) do
+        insert_category(current, rest, amount)
+      else
+        # Parent was a number (leaf), convert to node
+        insert_category(%{_value: current}, rest, amount)
+      end
+
+    Map.put(tree, parent, updated_children)
+  end
+
+  defp convert_to_sunburst(tree, root_name) when is_map(tree) do
+    children =
+      tree
+      |> Enum.map(fn {name, value_or_children} ->
+        cond do
+          is_number(value_or_children) ->
+            %{name: name, value: value_or_children}
+
+          is_map(value_or_children) and Map.has_key?(value_or_children, :_value) ->
+            # Has both value and children
+            direct_value = Map.get(value_or_children, :_value, 0)
+            child_map = Map.delete(value_or_children, :_value)
+            child_nodes = convert_to_sunburst_children(child_map)
+            child_total = Enum.reduce(child_nodes, 0, fn c, acc -> acc + (c.value || 0) end)
+            %{name: name, value: direct_value + child_total, children: child_nodes}
+
+          is_map(value_or_children) ->
+            # Only has children
+            child_nodes = convert_to_sunburst_children(value_or_children)
+            child_total = Enum.reduce(child_nodes, 0, fn c, acc -> acc + (c.value || 0) end)
+            %{name: name, value: child_total, children: child_nodes}
+
+          true ->
+            %{name: name, value: 0}
+        end
+      end)
+      |> Enum.filter(fn item -> item.value > 0 end)
+
+    total_value = Enum.reduce(children, 0, fn item, acc -> acc + (item.value || 0) end)
+
+    %{name: root_name, value: total_value, children: children}
+  end
+
+  defp convert_to_sunburst_children(children_map) when is_map(children_map) do
+    children_map
+    |> Enum.map(fn {name, value_or_children} ->
+      if is_number(value_or_children) do
+        %{name: name, value: value_or_children}
+      else
+        child_nodes = convert_to_sunburst_children(value_or_children)
+        child_total = Enum.reduce(child_nodes, 0, fn c, acc -> acc + (c.value || 0) end)
+        %{name: name, value: child_total, children: child_nodes}
+      end
+    end)
+    |> Enum.filter(fn item -> item.value > 0 end)
+  end
+
+  defp convert_to_sunburst_children(_), do: []
+
+  defp convert_to_sunburst(_, root_name), do: %{name: root_name, value: 0, children: []}
+
+  defp assets_liabilities_chart_data(summary) do
+    %{
+      labels: ["Assets", "Liabilities", "Net Worth"],
+      values: [
+        summary.total_assets || 0,
+        summary.total_liabilities || 0,
+        summary.net_worth || 0
+      ],
+      datasetLabel: "Financial Overview"
+    }
+  end
+
+  defp trends_chart_data(summary) do
+    require Logger
+    transactions = summary.transactions || []
+    Logger.info("trends_chart_data: #{length(transactions)} transactions")
+
+    if Enum.empty?(transactions) do
+      Logger.warning("No transactions available for trends chart")
+      %{dates: [], expenses: [], income: [], net_worth: []}
+    else
+      # Log sample transactions to debug
+      income_transactions =
+        Enum.filter(transactions, fn t -> String.starts_with?(t.account, "Income") end)
+
+      Logger.info("Found #{length(income_transactions)} income transactions")
+
+      if length(income_transactions) > 0 do
+        sample = List.first(income_transactions)
+
+        Logger.info(
+          "Sample income transaction: account=#{sample.account}, amount=#{sample.amount}, date=#{inspect(sample.date)}"
+        )
+      end
+
+      # Group transactions by date and calculate daily totals
+      daily_data =
+        transactions
+        |> Enum.group_by(& &1.date)
+        |> Enum.map(fn {date, day_transactions} ->
+          expenses =
+            day_transactions
+            |> Enum.filter(fn t -> String.starts_with?(t.account, "Expenses") end)
+            |> Enum.map(&abs(&1.amount))
+            |> Enum.sum()
+
+          income =
+            day_transactions
+            |> Enum.filter(fn t -> String.starts_with?(t.account, "Income") end)
+            |> Enum.map(&abs(&1.amount))
+            |> Enum.sum()
+
+          if income > 0 do
+            Logger.info("Date #{inspect(date)}: income=#{income}, expenses=#{expenses}")
+          end
+
+          {date, %{expenses: expenses, income: income}}
+        end)
+        |> Enum.sort_by(fn {date, _} -> date end)
+
+      # Calculate running net worth (cumulative)
+      {dates, expenses_list, income_list, net_worth_list} =
+        Enum.reduce(daily_data, {[], [], [], []}, fn {date, data},
+                                                     {dates_acc, exp_acc, inc_acc, nw_acc} ->
+          net_change = data.income - data.expenses
+          previous_net_worth = List.first(nw_acc) || 0
+          new_net_worth = previous_net_worth + net_change
+
+          {
+            [Date.to_string(date) | dates_acc],
+            [data.expenses | exp_acc],
+            [data.income | inc_acc],
+            [new_net_worth | nw_acc]
+          }
+        end)
+
+      %{
+        dates: Enum.reverse(dates),
+        expenses: Enum.reverse(expenses_list),
+        income: Enum.reverse(income_list),
+        net_worth: Enum.reverse(net_worth_list)
+      }
+    end
+  end
+
+  defp monthly_comparison_chart_data(summary) do
+    require Logger
+    transactions = summary.transactions || []
+    Logger.info("monthly_comparison_chart_data: #{length(transactions)} transactions")
+
+    if Enum.empty?(transactions) do
+      Logger.warning("No transactions available for monthly comparison chart")
+      %{months: [], income: [], expenses: []}
+    else
+      # Group transactions by month
+      monthly_data =
+        transactions
+        |> Enum.group_by(fn t -> {t.date.year, t.date.month} end)
+        |> Enum.map(fn {{year, month}, month_transactions} ->
+          expenses =
+            month_transactions
+            |> Enum.filter(fn t -> String.starts_with?(t.account, "Expenses") end)
+            |> Enum.map(&abs(&1.amount))
+            |> Enum.sum()
+
+          income =
+            month_transactions
+            |> Enum.filter(fn t -> String.starts_with?(t.account, "Income") end)
+            |> Enum.map(&abs(&1.amount))
+            |> Enum.sum()
+
+          month_label = "#{year}-#{String.pad_leading(Integer.to_string(month), 2, "0")}"
+          {month_label, %{expenses: expenses, income: income}}
+        end)
+        |> Enum.sort_by(fn {month_label, _} -> month_label end)
+
+      {months, expenses_list, income_list} =
+        Enum.reduce(monthly_data, {[], [], []}, fn {month, data},
+                                                   {months_acc, exp_acc, inc_acc} ->
+          {
+            [month | months_acc],
+            [data.expenses | exp_acc],
+            [data.income | inc_acc]
+          }
+        end)
+
+      %{
+        months: Enum.reverse(months),
+        income: Enum.reverse(income_list),
+        expenses: Enum.reverse(expenses_list)
+      }
+    end
+  end
+
+  defp asset_liability_flow_chart_data(summary) do
+    # Build treemap data from assets and liabilities
+    assets_data = build_asset_liability_tree(summary.total_assets || 0, "Assets")
+    liabilities_data = build_asset_liability_tree(summary.total_liabilities || 0, "Liabilities")
+
+    %{
+      tree: %{
+        name: "Financial Position",
+        value: (summary.total_assets || 0) + (summary.total_liabilities || 0),
+        children: [
+          assets_data,
+          liabilities_data
+        ]
+      }
+    }
+  end
+
+  defp build_asset_liability_tree(value, name) when value > 0 do
+    color = if name == "Assets", do: "#10b981", else: "#ef4444"
+
+    %{
+      name: name,
+      value: value,
+      itemStyle: %{
+        color: color
+      }
+    }
+  end
+
+  defp build_asset_liability_tree(_value, _name), do: %{name: "No Data", value: 0}
+end

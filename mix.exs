@@ -43,7 +43,8 @@ defmodule LedgerDashboard.MixProject do
       {:gettext, "~> 0.26"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.1.1"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:esbuild, "~> 0.7", runtime: Mix.env() == :dev}
     ]
   end
 
@@ -55,7 +56,10 @@ defmodule LedgerDashboard.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get"]
+      setup: ["deps.get", "assets.setup", "assets.build"],
+      "assets.setup": ["deps.get", "cmd npm install --prefix assets"],
+      "assets.build": ["esbuild default"],
+      "assets.deploy": ["esbuild default --minify", "phx.digest"]
     ]
   end
 end

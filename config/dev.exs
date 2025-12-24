@@ -14,7 +14,9 @@ config :ledger_dashboard, LedgerDashboardWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "SSV/Src4CSTMOJbW8QVjt4Bud0oLwLuNk7DQHImzEYRSlpI1loZC1dnetCM0c2Nl",
-  watchers: []
+  watchers: [
+    esbuild: {Esbuild, :install_and_run, [:default, ~w(--sourcemap=inline --watch)]}
+  ]
 
 # ## SSL Support
 #

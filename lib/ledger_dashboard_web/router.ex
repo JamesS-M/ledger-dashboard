@@ -17,7 +17,8 @@ defmodule LedgerDashboardWeb.Router do
   scope "/", LedgerDashboardWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/", UploadLive
+    live "/dashboard", DashboardLive
   end
 
   # Other scopes may use custom stacks.
