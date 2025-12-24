@@ -97,17 +97,25 @@ function updateSunburstCharts(sunburstIds, filteredTransactions) {
       }
     }
     
-    // Update chart - preserve all series properties and only update data
+    // Get current option to preserve all settings
     const currentOption = registryEntry.chart.getOption()
     const currentSeries = currentOption.series && currentOption.series[0] ? currentOption.series[0] : {}
     
-    // Preserve all series properties (type, radius, label, etc.) and only update data
+    // Update only the data, preserving all other series properties including the id
+    // Use animationDurationUpdate and animationEasingUpdate for data updates
     const updatedSeries = {
       ...currentSeries,
-      data: [treeData]
+      data: [treeData],
+      animationDurationUpdate: 500,
+      animationEasingUpdate: 'cubicOut'
     }
     
     const option = {
+      animation: true,
+      animationDuration: 500,
+      animationEasing: 'cubicOut',
+      animationDurationUpdate: 500,
+      animationEasingUpdate: 'cubicOut',
       series: [updatedSeries]
     }
     
@@ -116,11 +124,12 @@ function updateSunburstCharts(sunburstIds, filteredTransactions) {
       console.log(`First child:`, treeData.children[0])
     }
     
-    // Use notMerge: false to merge with existing options, preserving colors and other config
-    registryEntry.chart.setOption(option, { notMerge: false, replaceMerge: ['series'] })
-    
-    // Force a resize to ensure the chart updates
-    registryEntry.chart.resize()
+    // Use notMerge: false to allow ECharts to merge and animate
+    // The series id ensures ECharts matches the correct series for animation
+    registryEntry.chart.setOption(option, { 
+      notMerge: false,
+      lazyUpdate: false
+    })
   })
 }
 
@@ -502,8 +511,12 @@ export const ChartHook = {
       
       return {
         color: positivePalette,
+        animation: true,
+        animationDuration: 500,
+        animationEasing: 'cubicOut',
         series: [
           {
+            id: hook && hook.chartId ? hook.chartId : 'sunburst',
             type: "sunburst",
             data: [tree],
             radius: [0, "90%"],
