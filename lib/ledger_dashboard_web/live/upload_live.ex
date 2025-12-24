@@ -24,12 +24,12 @@ defmodule LedgerDashboardWeb.UploadLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-lg">
-        <h1 class="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
+    <div class="grid grid-cols-1 gap-6 p-6 sm:gap-8 sm:p-8 lg:gap-12 lg:p-12 lg:max-w-2xl lg:mx-auto">
+      <div class="col-span-1 mb-2">
+        <h1 class="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl lg:text-4xl">
           Ledger Dashboard
         </h1>
-        <p class="mt-2 text-lg leading-8 text-zinc-600">
+        <p class="mt-3 text-base leading-7 text-zinc-600 sm:mt-4 sm:text-lg sm:leading-8">
           Upload your ledger file to analyze your financial data.
         </p>
 
@@ -38,13 +38,13 @@ defmodule LedgerDashboardWeb.UploadLive do
           phx-submit="save"
           phx-change="validate"
           multipart={true}
-          class="mt-8"
+          class="mt-8 sm:mt-10"
         >
           <div>
             <label for="ledger" class="block text-sm font-medium leading-6 text-zinc-900">
               Ledger File
             </label>
-            <div class="mt-2">
+            <div class="mt-3">
               <.live_file_input
                 upload={@uploads.ledger}
                 class="block w-full text-sm text-zinc-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-zinc-50 file:text-zinc-700 hover:file:bg-zinc-100"
@@ -55,27 +55,27 @@ defmodule LedgerDashboardWeb.UploadLive do
             </.error>
           </div>
 
-          <div :for={entry <- @uploads.ledger.entries} class="mt-4">
+          <div :for={entry <- @uploads.ledger.entries} class="mt-6">
             <div class="flex items-center gap-2">
               <span class="text-sm text-zinc-600">{entry.client_name}</span>
               <span class="text-sm text-zinc-400">({format_file_size(entry.client_size)})</span>
             </div>
-            <progress value={entry.progress} max="100" class="mt-2 w-full">
+            <progress value={entry.progress} max="100" class="mt-3 w-full rounded-xl">
               {entry.progress}%
             </progress>
           </div>
 
-          <div :if={@error} class="mt-4 rounded-md bg-red-50 p-4">
+          <div :if={@error} class="mt-6 rounded-xl bg-red-50 p-5">
             <div class="text-sm text-red-800">
               {@error}
             </div>
           </div>
 
-          <div class="mt-6">
+          <div class="mt-8">
             <button
               type="submit"
               phx-disable-with="Analyzing..."
-              class="rounded-lg bg-zinc-900 hover:bg-zinc-700 py-2 px-3 text-sm font-semibold leading-6 text-white active:text-white/80 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="w-full rounded-xl bg-zinc-900 hover:bg-zinc-700 py-3 px-6 text-sm font-semibold leading-6 text-white active:text-white/80 disabled:opacity-50 disabled:cursor-not-allowed sm:w-auto"
             >
               Analyze Ledger
             </button>

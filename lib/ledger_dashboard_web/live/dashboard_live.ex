@@ -28,18 +28,19 @@ defmodule LedgerDashboardWeb.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-      <div class="mb-8">
-        <h1 class="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
+    <div class="grid grid-cols-1 gap-6 p-6 sm:gap-8 sm:p-8 lg:gap-12 lg:p-12 lg:max-w-7xl lg:mx-auto">
+      <!-- Header -->
+      <div class="col-span-1 mb-2">
+        <h1 class="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl lg:text-4xl">
           Ledger Dashboard
         </h1>
-        <p class="mt-2 text-lg leading-8 text-zinc-600">
+        <p class="mt-3 text-base leading-7 text-zinc-600 sm:mt-4 sm:text-lg sm:leading-8">
           Financial summary from your ledger file
         </p>
       </div>
       
-    <!-- Summary Cards Row -->
-      <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+    <!-- Summary Cards Row - Mobile: 1 col, Tablet: 3 cols -->
+      <div class="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:gap-8">
         <.summary_card
           label="Total Expenses"
           value={format_number(@analysis_result.summary.total_expenses)}
@@ -54,8 +55,8 @@ defmodule LedgerDashboardWeb.DashboardLive do
         />
       </div>
       
-    <!-- Sunburst Charts Row -->
-      <div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <!-- Sunburst Charts Row - Mobile: 1 col, Desktop: 2 cols -->
+      <div class="grid grid-cols-1 gap-6 sm:gap-8 lg:grid-cols-2">
         <.chart_card
           title="Expense Breakdown"
           chart_type="sunburst"
@@ -68,8 +69,8 @@ defmodule LedgerDashboardWeb.DashboardLive do
         />
       </div>
       
-    <!-- Trends Over Time Line Chart -->
-      <div class="mt-8">
+    <!-- Trends Over Time Line Chart - Full width -->
+      <div class="col-span-1">
         <.chart_card
           title="Trends Over Time"
           chart_type="line"
@@ -77,8 +78,8 @@ defmodule LedgerDashboardWeb.DashboardLive do
         />
       </div>
       
-    <!-- Income vs Expenses by Month Stacked Bar -->
-      <div class="mt-8">
+    <!-- Income vs Expenses by Month Stacked Bar - Full width -->
+      <div class="col-span-1">
         <.chart_card
           title="Income vs Expenses by Month"
           chart_type="stacked_bar"
@@ -86,16 +87,17 @@ defmodule LedgerDashboardWeb.DashboardLive do
         />
       </div>
       
-    <!-- Asset / Liability Flow Treemap -->
-      <div class="mt-8">
+    <!-- Asset / Liability Flow Treemap - Full width -->
+      <div class="col-span-1">
         <.chart_card
           title="Asset / Liability Flow"
           chart_type="treemap"
           chart_data={asset_liability_flow_chart_data(@analysis_result.summary)}
         />
       </div>
-
-      <div class="mt-8">
+      
+    <!-- Back link -->
+      <div class="col-span-1">
         <.link
           navigate={~p"/"}
           class="text-sm font-semibold leading-6 text-zinc-900 hover:text-zinc-700"
@@ -109,21 +111,16 @@ defmodule LedgerDashboardWeb.DashboardLive do
 
   defp summary_card(assigns) do
     ~H"""
-    <div class="overflow-hidden rounded-lg bg-white shadow">
-      <div class="p-5">
-        <div class="flex items-center">
-          <div class="flex-shrink-0"></div>
-          <div class="ml-5 w-0 flex-1">
-            <dl>
-              <dt class="text-sm font-medium text-zinc-500 truncate">
-                {@label}
-              </dt>
-              <dd class="mt-1 text-3xl font-semibold text-zinc-900">
-                {@value}
-              </dd>
-            </dl>
-          </div>
-        </div>
+    <div class="overflow-hidden rounded-xl bg-white shadow-sm">
+      <div class="p-6 sm:p-8">
+        <dl>
+          <dt class="text-xs font-medium text-zinc-500 truncate sm:text-sm">
+            {@label}
+          </dt>
+          <dd class="mt-2 text-2xl font-semibold text-zinc-900 sm:mt-3 sm:text-3xl">
+            {@value}
+          </dd>
+        </dl>
       </div>
     </div>
     """
@@ -143,9 +140,9 @@ defmodule LedgerDashboardWeb.DashboardLive do
     height_class = get_chart_height(assigns.chart_type)
 
     ~H"""
-    <div class="overflow-hidden rounded-lg bg-white shadow">
-      <div class="p-5">
-        <h3 class="text-lg font-medium text-zinc-900 mb-4">{@title}</h3>
+    <div class="overflow-hidden rounded-xl bg-white shadow-sm">
+      <div class="p-6 sm:p-8">
+        <h3 class="text-base font-medium text-zinc-900 mb-4 sm:text-lg sm:mb-6">{@title}</h3>
         <div
           id={chart_id}
           phx-hook="Chart"
@@ -153,18 +150,22 @@ defmodule LedgerDashboardWeb.DashboardLive do
           data-chart-data={Jason.encode!(@chart_data)}
           class={["w-full", height_class]}
         >
-          <div class="chart-container w-full h-full" style="min-height: 256px;"></div>
+          <div
+            class="chart-container w-full h-full rounded-lg overflow-hidden"
+            style="min-height: 256px;"
+          >
+          </div>
         </div>
       </div>
     </div>
     """
   end
 
-  defp get_chart_height("sunburst"), do: "h-64"
-  defp get_chart_height("line"), do: "h-80"
-  defp get_chart_height("stacked_bar"), do: "h-80"
-  defp get_chart_height("treemap"), do: "h-96"
-  defp get_chart_height(_), do: "h-64"
+  defp get_chart_height("sunburst"), do: "h-64 sm:h-80"
+  defp get_chart_height("line"), do: "h-72 sm:h-80 lg:h-96"
+  defp get_chart_height("stacked_bar"), do: "h-72 sm:h-80 lg:h-96"
+  defp get_chart_height("treemap"), do: "h-80 sm:h-96 lg:h-[28rem]"
+  defp get_chart_height(_), do: "h-64 sm:h-80"
 
   defp expense_chart_data(expense_categories) when is_list(expense_categories) do
     # Build hierarchical tree structure for sunburst chart
