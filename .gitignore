@@ -27,6 +27,8 @@ ledger_dashboard-*.tar
 
 assets/node_modules/
 
-# Generated build artifacts
-priv/static/assets/app.css
-priv/static/assets/app.js
+# Generated build artifacts (these are built during deployment)
+priv/static/assets/*.css
+priv/static/assets/*.js
+!priv/static/assets/*.css.map
+!priv/static/assets/*.js.map
