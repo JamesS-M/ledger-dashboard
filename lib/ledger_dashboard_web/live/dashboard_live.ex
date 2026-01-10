@@ -576,14 +576,22 @@ defmodule LedgerDashboardWeb.DashboardLive do
             # Extract category from account path (e.g., "Expenses:Food:Groceries" -> "Food:Groceries")
             account = t.account
 
-            if String.contains?(account, ":") do
-              account
-              |> String.split(":")
-              |> Enum.drop(1)
-              |> Enum.join(":")
+            category =
+              if String.contains?(account, ":") do
+                account
+                |> String.split(":")
+                |> Enum.drop(1)
+                |> Enum.join(":")
+              else
+                # Fallback: use account name without prefix
+                String.replace_prefix(account, account_prefix, "")
+              end
+
+            # Replace empty or nil categories with "Uncategorized"
+            if category == "" or is_nil(category) do
+              "Uncategorized"
             else
-              # Fallback: use account name without prefix
-              String.replace_prefix(account, account_prefix, "")
+              category
             end
           end)
           |> Enum.map(fn {category, cat_transactions} ->
