@@ -62,25 +62,32 @@ defmodule LedgerDashboardWeb.DashboardLive do
           chart_type="sunburst"
           chart_id="expense-breakdown"
           chart_data={expense_chart_data(@analysis_result.summary.expense_categories)}
-          linked_chart_id="category-trends-over-time"
+          linked_chart_id="expense-category-trends-over-time"
         />
         <.chart_card
           title="Income Breakdown"
           chart_type="sunburst"
           chart_id="income-breakdown"
           chart_data={income_chart_data(@analysis_result.summary.income_categories)}
-          linked_chart_id="category-trends-over-time"
+          linked_chart_id="income-category-trends-over-time"
         />
       </div>
       
-    <!-- Category Trends Line Chart - Full width -->
-      <div class="col-span-1">
+    <!-- Category Trends Line Charts - Full width, split into expenses and income -->
+      <div class="grid grid-cols-1 gap-6 sm:gap-8 lg:grid-cols-2">
         <.chart_card
-          title="Category Trends Over Time"
+          title="Expense Category Trends Over Time"
           chart_type="category_lines"
-          chart_id="category-trends-over-time"
-          chart_data={category_trends_chart_data(@analysis_result.summary)}
-          linked_sunburst_ids={["expense-breakdown", "income-breakdown"]}
+          chart_id="expense-category-trends-over-time"
+          chart_data={expense_category_trends_chart_data(@analysis_result.summary)}
+          linked_chart_id="expense-breakdown"
+        />
+        <.chart_card
+          title="Income Category Trends Over Time"
+          chart_type="category_lines"
+          chart_id="income-category-trends-over-time"
+          chart_data={income_category_trends_chart_data(@analysis_result.summary)}
+          linked_chart_id="income-breakdown"
         />
       </div>
       
@@ -514,90 +521,122 @@ defmodule LedgerDashboardWeb.DashboardLive do
 
   defp build_asset_liability_tree(_value, _name), do: %{name: "No Data", value: 0}
 
-  defp category_trends_chart_data(summary) do
+  defp expense_category_trends_chart_data(summary) do
     require Logger
     transactions = summary.transactions || []
-    Logger.info("category_trends_chart_data: #{length(transactions)} transactions")
 
-    if Enum.empty?(transactions) do
-      Logger.warning("No transactions available for category trends chart")
+    # Filter to only include Expenses accounts (exclude Assets, Liabilities, Income)
+    expense_transactions =
+      transactions
+      |> Enum.filter(fn t -> String.starts_with?(t.account, "Expenses") end)
+
+    Logger.info(
+      "expense_category_trends_chart_data: #{length(expense_transactions)} expense transactions"
+    )
+
+    if Enum.empty?(expense_transactions) do
+      Logger.warning("No expense transactions available for expense category trends chart")
       %{dates: [], categories: [], series: [], transactions: []}
     else
-      # Group transactions by month
-      monthly_data =
-        transactions
-        |> Enum.group_by(fn t -> {t.date.year, t.date.month} end)
-        |> Enum.map(fn {{year, month}, month_transactions} ->
-          # Group by category (extract category from account path)
-          category_data =
-            month_transactions
-            |> Enum.group_by(fn t ->
-              # Extract category from account path (e.g., "Expenses:Food:Groceries" -> "Food:Groceries")
-              account = t.account
-
-              if String.contains?(account, ":") do
-                account
-                |> String.split(":")
-                |> Enum.drop(1)
-                |> Enum.join(":")
-              else
-                # Fallback: use account name without prefix
-                String.replace_prefix(account, "Expenses", "")
-                |> String.replace_prefix("Income", "")
-              end
-            end)
-            |> Enum.map(fn {category, cat_transactions} ->
-              total = Enum.map(cat_transactions, &abs(&1.amount)) |> Enum.sum()
-              {category, total}
-            end)
-            |> Enum.into(%{})
-
-          month_label = "#{year}-#{String.pad_leading(Integer.to_string(month), 2, "0")}"
-          {month_label, category_data}
-        end)
-        |> Enum.sort_by(fn {month_label, _} -> month_label end)
-
-      # Get all unique categories across all months
-      all_categories =
-        monthly_data
-        |> Enum.flat_map(fn {_month, cat_data} -> Map.keys(cat_data) end)
-        |> Enum.uniq()
-        |> Enum.sort()
-
-      # Build series data for each category
-      months = Enum.map(monthly_data, fn {month, _} -> month end)
-
-      series =
-        Enum.map(all_categories, fn category ->
-          values =
-            Enum.map(monthly_data, fn {_month, cat_data} ->
-              Map.get(cat_data, category, 0)
-            end)
-
-          %{name: category, data: values}
-        end)
-
-      # Include all transactions for filtering by date range
-      # Keep original date format for filtering, but also include month for grouping
-      all_transactions =
-        Enum.map(transactions, fn t ->
-          month_label =
-            "#{t.date.year}-#{String.pad_leading(Integer.to_string(t.date.month), 2, "0")}"
-
-          %{
-            date: Date.to_string(t.date),
-            month: month_label,
-            account: t.account,
-            amount: t.amount
-          }
-        end)
-
-      %{
-        dates: months,
-        categories: all_categories,
-        series: series,
-        transactions: all_transactions
-      }
+      build_category_trends_data(expense_transactions, "Expenses")
     end
+  end
+
+  defp income_category_trends_chart_data(summary) do
+    require Logger
+    transactions = summary.transactions || []
+
+    # Filter to only include Income accounts (exclude Assets, Liabilities, Expenses)
+    income_transactions =
+      transactions
+      |> Enum.filter(fn t -> String.starts_with?(t.account, "Income") end)
+
+    Logger.info(
+      "income_category_trends_chart_data: #{length(income_transactions)} income transactions"
+    )
+
+    if Enum.empty?(income_transactions) do
+      Logger.warning("No income transactions available for income category trends chart")
+      %{dates: [], categories: [], series: [], transactions: []}
+    else
+      build_category_trends_data(income_transactions, "Income")
+    end
+  end
+
+  defp build_category_trends_data(transactions, account_prefix) do
+    # Group transactions by month
+    monthly_data =
+      transactions
+      |> Enum.group_by(fn t -> {t.date.year, t.date.month} end)
+      |> Enum.map(fn {{year, month}, month_transactions} ->
+        # Group by category (extract category from account path)
+        category_data =
+          month_transactions
+          |> Enum.group_by(fn t ->
+            # Extract category from account path (e.g., "Expenses:Food:Groceries" -> "Food:Groceries")
+            account = t.account
+
+            if String.contains?(account, ":") do
+              account
+              |> String.split(":")
+              |> Enum.drop(1)
+              |> Enum.join(":")
+            else
+              # Fallback: use account name without prefix
+              String.replace_prefix(account, account_prefix, "")
+            end
+          end)
+          |> Enum.map(fn {category, cat_transactions} ->
+            total = Enum.map(cat_transactions, &abs(&1.amount)) |> Enum.sum()
+            {category, total}
+          end)
+          |> Enum.into(%{})
+
+        month_label = "#{year}-#{String.pad_leading(Integer.to_string(month), 2, "0")}"
+        {month_label, category_data}
+      end)
+      |> Enum.sort_by(fn {month_label, _} -> month_label end)
+
+    # Get all unique categories across all months
+    all_categories =
+      monthly_data
+      |> Enum.flat_map(fn {_month, cat_data} -> Map.keys(cat_data) end)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    # Build series data for each category
+    months = Enum.map(monthly_data, fn {month, _} -> month end)
+
+    series =
+      Enum.map(all_categories, fn category ->
+        values =
+          Enum.map(monthly_data, fn {_month, cat_data} ->
+            Map.get(cat_data, category, 0)
+          end)
+
+        %{name: category, data: values}
+      end)
+
+    # Include filtered transactions for filtering by date range
+    # Keep original date format for filtering, but also include month for grouping
+    all_transactions =
+      Enum.map(transactions, fn t ->
+        month_label =
+          "#{t.date.year}-#{String.pad_leading(Integer.to_string(t.date.month), 2, "0")}"
+
+        %{
+          date: Date.to_string(t.date),
+          month: month_label,
+          account: t.account,
+          amount: t.amount
+        }
+      end)
+
+    %{
+      dates: months,
+      categories: all_categories,
+      series: series,
+      transactions: all_transactions
+    }
   end
 end
