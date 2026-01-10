@@ -38,7 +38,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           Financial summary from your ledger file
         </p>
       </div>
-
+      
     <!-- Summary Cards Row - Mobile: 1 col, Tablet: 3 cols -->
       <div class="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:gap-8">
         <.summary_card
@@ -54,7 +54,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           value={format_number(@analysis_result.summary.net_worth)}
         />
       </div>
-
+      
     <!-- Sunburst Charts Row - Mobile: 1 col, Desktop: 2 cols -->
       <div class="grid grid-cols-1 gap-6 sm:gap-8 lg:grid-cols-2">
         <.chart_card
@@ -72,7 +72,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           linked_chart_id="category-trends-over-time"
         />
       </div>
-
+      
     <!-- Category Trends Line Chart - Full width -->
       <div class="col-span-1">
         <.chart_card
@@ -83,7 +83,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           linked_sunburst_ids={["expense-breakdown", "income-breakdown"]}
         />
       </div>
-
+      
     <!-- Trends Over Time Line Chart - Full width -->
       <div class="col-span-1">
         <.chart_card
@@ -92,7 +92,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           chart_data={trends_chart_data(@analysis_result.summary)}
         />
       </div>
-
+      
     <!-- Income vs Expenses by Month Stacked Bar - Full width -->
       <div class="col-span-1">
         <.chart_card
@@ -101,7 +101,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           chart_data={monthly_comparison_chart_data(@analysis_result.summary)}
         />
       </div>
-
+      
     <!-- Asset / Liability Flow Treemap - Full width -->
       <div class="col-span-1">
         <.chart_card
@@ -110,7 +110,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
           chart_data={asset_liability_flow_chart_data(@analysis_result.summary)}
         />
       </div>
-
+      
     <!-- Back link -->
       <div class="col-span-1">
         <.link
@@ -150,7 +150,10 @@ defmodule LedgerDashboardWeb.DashboardLive do
   defp format_number(_value), do: "0"
 
   defp chart_card(assigns) do
-    chart_id = assigns[:chart_id] || "chart-#{String.replace(assigns.title, " ", "-") |> String.downcase()}"
+    chart_id =
+      assigns[:chart_id] ||
+        "chart-#{String.replace(assigns.title, " ", "-") |> String.downcase()}"
+
     # Different heights for different chart types
     height_class = get_chart_height(assigns.chart_type)
     linked_chart_id = assigns[:linked_chart_id]
@@ -166,7 +169,9 @@ defmodule LedgerDashboardWeb.DashboardLive do
           data-chart-type={@chart_type}
           data-chart-data={Jason.encode!(@chart_data)}
           data-linked-chart-id={if linked_chart_id, do: linked_chart_id, else: ""}
-          data-linked-sunburst-ids={if linked_sunburst_ids != [], do: Jason.encode!(linked_sunburst_ids), else: ""}
+          data-linked-sunburst-ids={
+            if linked_sunburst_ids != [], do: Jason.encode!(linked_sunburst_ids), else: ""
+          }
           class={["w-full", height_class]}
         >
           <div
@@ -382,7 +387,6 @@ defmodule LedgerDashboardWeb.DashboardLive do
           # those include internal transfers which don't affect net worth
           net_worth_change = income - expenses
 
-
           {date, %{expenses: expenses, income: income, net_worth_change: net_worth_change}}
         end)
         |> Enum.sort_by(fn {date, _} -> date end)
@@ -394,23 +398,19 @@ defmodule LedgerDashboardWeb.DashboardLive do
         |> Enum.map(fn {_date, data} -> data.net_worth_change end)
         |> Enum.sum()
 
-      total_income =
-        daily_data
-        |> Enum.map(fn {_date, data} -> data.income end)
-        |> Enum.sum()
-
-      total_expenses =
-        daily_data
-        |> Enum.map(fn {_date, data} -> data.expenses end)
-        |> Enum.sum()
-
       initial_net_worth = (summary.net_worth || 0) - total_net_worth_change
 
       Logger.info(
-        "Net worth calculation: initial=#{initial_net_worth}, current=#{summary.net_worth}, total_change=#{total_net_worth_change}, total_income=#{total_income}, total_expenses=#{total_expenses}, income-expenses=#{total_income - total_expenses}"
+        "Net worth calculation: initial=#{initial_net_worth}, current=#{summary.net_worth}, total_change=#{total_net_worth_change}"
       )
 
       # Calculate running net worth (cumulative from initial)
+      # We build lists by prepending (using [item | acc]), so nw_acc accumulates in reverse
+      # chronological order. List.first(nw_acc) retrieves the most recently prepended net worth
+      # (the previous day's value), not the earliest. When nw_acc is empty (first iteration),
+      # we fall back to initial_net_worth. This prepending approach is efficient and allows us
+      # to compute new_net_worth = previous_net_worth + data.net_worth_change for each day in
+      # daily_data, then reverse all lists at the end to restore chronological order.
       {dates, expenses_list, income_list, net_worth_list} =
         Enum.reduce(daily_data, {[], [], [], []}, fn {date, data},
                                                      {dates_acc, exp_acc, inc_acc, nw_acc} ->
@@ -581,7 +581,9 @@ defmodule LedgerDashboardWeb.DashboardLive do
       # Keep original date format for filtering, but also include month for grouping
       all_transactions =
         Enum.map(transactions, fn t ->
-          month_label = "#{t.date.year}-#{String.pad_leading(Integer.to_string(t.date.month), 2, "0")}"
+          month_label =
+            "#{t.date.year}-#{String.pad_leading(Integer.to_string(t.date.month), 2, "0")}"
+
           %{
             date: Date.to_string(t.date),
             month: month_label,

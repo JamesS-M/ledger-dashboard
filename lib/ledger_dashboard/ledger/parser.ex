@@ -7,6 +7,8 @@ defmodule LedgerDashboard.Ledger.Parser do
 
   alias LedgerDashboard.Ledger.Summary
 
+  require Logger
+
   @doc """
   Parses output from `ledger balance` command (JSON or text format).
 
@@ -18,8 +20,6 @@ defmodule LedgerDashboard.Ledger.Parser do
     # Try to parse as JSON first
     case Jason.decode(trimmed) do
       {:ok, parsed} when is_list(parsed) ->
-        require Logger
-
         Logger.info(
           "Parsed JSON array with #{length(parsed)} items. First item: #{inspect(List.first(parsed))}"
         )
@@ -27,8 +27,6 @@ defmodule LedgerDashboard.Ledger.Parser do
         extract_summary(parsed)
 
       {:ok, parsed} when is_map(parsed) ->
-        require Logger
-
         Logger.info(
           "Parsed JSON object: keys=#{inspect(Map.keys(parsed))}, sample=#{inspect(parsed)}"
         )
@@ -98,7 +96,6 @@ defmodule LedgerDashboard.Ledger.Parser do
         amount
 
       :error ->
-        require Logger
         Logger.debug("Failed to parse amount: #{inspect(amount_str)} -> #{inspect(cleaned)}")
         0
     end
@@ -107,7 +104,6 @@ defmodule LedgerDashboard.Ledger.Parser do
   defp parse_amount(_), do: 0
 
   defp extract_summary(parsed) when is_list(parsed) do
-    require Logger
     Logger.info("Extracting summary from #{length(parsed)} items")
 
     # Check if this is hledger format (array of arrays) or ledger format (array of objects)
@@ -208,7 +204,6 @@ defmodule LedgerDashboard.Ledger.Parser do
   end
 
   defp extract_summary_from_object(parsed) do
-    require Logger
     Logger.info("Attempting to extract from object: keys=#{inspect(Map.keys(parsed))}")
 
     # hledger JSON might have a different structure
@@ -231,8 +226,6 @@ defmodule LedgerDashboard.Ledger.Parser do
   end
 
   defp extract_total_for_account_type(accounts, account_type) do
-    require Logger
-
     matching_accounts = Enum.filter(accounts, &account_matches_type?(&1, account_type))
     Logger.info("Found #{length(matching_accounts)} #{account_type} accounts")
 
@@ -446,7 +439,6 @@ defmodule LedgerDashboard.Ledger.Parser do
   Each transaction is a map with :date, :account, and :amount keys.
   """
   def parse_register(output_string) when is_binary(output_string) do
-    require Logger
     trimmed = String.trim(output_string)
 
     if String.length(trimmed) == 0 do
@@ -480,18 +472,23 @@ defmodule LedgerDashboard.Ledger.Parser do
   end
 
   defp parse_hledger_register_json(entries) do
-    require Logger
     Logger.info("Parsing #{length(entries)} register entries")
 
     # Log sample entries to understand the structure
     if length(entries) > 0 do
       sample_entry = List.first(entries)
-      Logger.info("Sample entry type: #{inspect(is_list(sample_entry))}, is_map: #{inspect(is_map(sample_entry))}")
+
+      Logger.debug(
+        "Sample entry type: #{inspect(is_list(sample_entry))}, is_map: #{inspect(is_map(sample_entry))}"
+      )
 
       if is_map(sample_entry) do
-        Logger.info("Sample entry keys: #{inspect(Map.keys(sample_entry))}")
+        Logger.debug("Sample entry keys: #{inspect(Map.keys(sample_entry))}")
+
         if Map.has_key?(sample_entry, "apostings") do
-          Logger.info("Sample entry has apostings with #{length(sample_entry["apostings"])} items")
+          Logger.debug(
+            "Sample entry has apostings with #{length(sample_entry["apostings"])} items"
+          )
         end
       end
     end
@@ -525,7 +522,7 @@ defmodule LedgerDashboard.Ledger.Parser do
 
                   # Log income transactions for debugging
                   if account && String.starts_with?(account, "Income") do
-                    Logger.info(
+                    Logger.debug(
                       "Found income posting: account=#{inspect(account)}, amount=#{inspect(amount)}, date=#{inspect(date)}, effective_date=#{inspect(effective_date)}, has_date=#{!is_nil(effective_date)}, is_number=#{is_number(amount)}"
                     )
                   end
@@ -533,8 +530,9 @@ defmodule LedgerDashboard.Ledger.Parser do
                   if effective_date && account && is_number(amount) do
                     [%{date: effective_date, account: account, amount: amount}]
                   else
-                    # Log why we're skipping income transactions
-                    if account && String.starts_with?(account, "Income") do
+                    # Log why we're skipping income transactions only for unexpected conditions
+                    if account && String.starts_with?(account, "Income") &&
+                         (is_nil(effective_date) || not is_number(amount)) do
                       Logger.warning(
                         "Skipping income transaction: account=#{inspect(account)}, amount=#{inspect(amount)}, date=#{inspect(date)}, effective_date=#{inspect(effective_date)}"
                       )
@@ -600,10 +598,19 @@ defmodule LedgerDashboard.Ledger.Parser do
               {[], last_date}
           end
 
-        {acc_transactions ++ new_transactions, new_last_date}
+        # Prepend each transaction from new_transactions onto acc_transactions
+        # This is O(1) per transaction instead of O(n) concatenation
+        updated_acc_transactions =
+          Enum.reduce(new_transactions, acc_transactions, fn transaction, acc ->
+            [transaction | acc]
+          end)
+
+        {updated_acc_transactions, new_last_date}
       end)
 
-    transactions
+    # Reverse the accumulated transactions to restore original order
+    # (we prepended them for O(1) performance during accumulation)
+    transactions = Enum.reverse(transactions)
 
     Logger.info("Extracted #{length(transactions)} transactions from register")
 
@@ -630,6 +637,7 @@ defmodule LedgerDashboard.Ledger.Parser do
         cond do
           is_list(entry) and length(entry) >= 4 ->
             posting = Enum.at(entry, 3)
+
             if is_map(posting) do
               account = extract_account_from_posting(posting)
               account && String.starts_with?(account, "Income")
@@ -667,10 +675,11 @@ defmodule LedgerDashboard.Ledger.Parser do
     {:ok, transactions}
   end
 
-  defp parse_hledger_register_array([date_str, _status, _description, posting, _balance], last_date)
+  defp parse_hledger_register_array(
+         [date_str, _status, _description, posting, _balance],
+         last_date
+       )
        when is_map(posting) do
-    require Logger
-
     # Parse date from date_str, or use last_date if date_str is nil
     # (hledger register only shows date on first posting of each transaction)
     parsed_date =
@@ -706,7 +715,13 @@ defmodule LedgerDashboard.Ledger.Parser do
     end
   end
 
-  defp parse_hledger_register_array(_, last_date), do: {[], last_date}
+  defp parse_hledger_register_array(unmatched, last_date) do
+    Logger.debug(
+      "parse_hledger_register_array: unmatched array format - value=#{inspect(unmatched)}, last_date=#{inspect(last_date)}"
+    )
+
+    {[], last_date}
+  end
 
   defp extract_account_from_posting(posting) when is_map(posting) do
     cond do
@@ -882,7 +897,6 @@ defmodule LedgerDashboard.Ledger.Parser do
   defp parse_date(_), do: nil
 
   defp parse_register_text(text) do
-    require Logger
     lines = String.split(text, "\n", trim: true)
     Logger.info("Parsing register text with #{length(lines)} lines")
 

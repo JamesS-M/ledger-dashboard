@@ -8,6 +8,8 @@ defmodule LedgerDashboard.Ledger.Runner do
 
   @timeout 5_000
 
+  require Logger
+
   @doc """
   Executes balance command on the given file using hledger.
 
@@ -44,7 +46,6 @@ defmodule LedgerDashboard.Ledger.Runner do
   Reserved for future use.
   """
   def run_register(file_path) when is_binary(file_path) do
-    require Logger
     Logger.info("Runner: Running register command for file: #{file_path}")
 
     # Try hledger with JSON output first
