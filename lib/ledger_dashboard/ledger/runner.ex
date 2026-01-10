@@ -48,7 +48,9 @@ defmodule LedgerDashboard.Ledger.Runner do
     Logger.info("Runner: Running register command for file: #{file_path}")
 
     # Try hledger with JSON output first
-    # Note: hledger register shows all postings by default (unlike ledger which needs --all)
+    # hledger register by default shows all transactions, but we need to ensure
+    # all account types are included. Using empty query to match all accounts.
+    # Alternatively, we could use "Income|Expenses|Assets|Liabilities" but empty should work.
     case execute_command("hledger", file_path, ["register", "-O", "json"]) do
       {:ok, output} ->
         trimmed = String.trim(output)

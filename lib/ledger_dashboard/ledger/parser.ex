@@ -483,56 +483,127 @@ defmodule LedgerDashboard.Ledger.Parser do
     require Logger
     Logger.info("Parsing #{length(entries)} register entries")
 
-    transactions =
+    # Log sample entries to understand the structure
+    if length(entries) > 0 do
+      sample_entry = List.first(entries)
+      Logger.info("Sample entry type: #{inspect(is_list(sample_entry))}, is_map: #{inspect(is_map(sample_entry))}")
+
+      if is_map(sample_entry) do
+        Logger.info("Sample entry keys: #{inspect(Map.keys(sample_entry))}")
+        if Map.has_key?(sample_entry, "apostings") do
+          Logger.info("Sample entry has apostings with #{length(sample_entry["apostings"])} items")
+        end
+      end
+    end
+
+    # Track the last seen date to handle cases where register only shows date on first posting
+    {transactions, _last_date} =
       entries
-      |> Enum.flat_map(fn entry ->
+      |> Enum.reduce({[], nil}, fn entry, {acc_transactions, last_date} ->
         # hledger register JSON format can be:
         # 1. Array format: ["2022-12-31", nil, "Description", %{posting}, [balance]]
         # 2. Map format: %{t: {...}, apostings: [...]}
         # 3. Direct posting map: %{account: ..., amount: ...}
 
-        cond do
-          is_list(entry) and length(entry) >= 4 ->
-            # Array format: [date, status, description, posting, balance]
-            parse_hledger_register_array(entry)
+        {new_transactions, new_last_date} =
+          cond do
+            is_list(entry) and length(entry) >= 4 ->
+              # Array format: [date, status, description, posting, balance]
+              # Use last_date if current date is nil (register only shows date on first posting)
+              parse_hledger_register_array(entry, last_date)
 
-          is_map(entry) and Map.has_key?(entry, "apostings") and is_list(entry["apostings"]) ->
-            # Transaction with postings array
-            date = extract_date_from_entry(entry)
+            is_map(entry) and Map.has_key?(entry, "apostings") and is_list(entry["apostings"]) ->
+              # Transaction with postings array
+              date = extract_date_from_entry(entry)
+              effective_date = date || last_date
 
-            entry["apostings"]
-            |> Enum.flat_map(fn posting ->
-              account = extract_account_from_posting(posting)
-              amount = extract_amount_from_posting(posting)
+              transactions_from_postings =
+                entry["apostings"]
+                |> Enum.flat_map(fn posting ->
+                  account = extract_account_from_posting(posting)
+                  amount = extract_amount_from_posting(posting)
 
-              if date && account && is_number(amount) do
-                [%{date: date, account: account, amount: amount}]
-              else
-                []
+                  # Log income transactions for debugging
+                  if account && String.starts_with?(account, "Income") do
+                    Logger.info(
+                      "Found income posting: account=#{inspect(account)}, amount=#{inspect(amount)}, date=#{inspect(date)}, effective_date=#{inspect(effective_date)}, has_date=#{!is_nil(effective_date)}, is_number=#{is_number(amount)}"
+                    )
+                  end
+
+                  if effective_date && account && is_number(amount) do
+                    [%{date: effective_date, account: account, amount: amount}]
+                  else
+                    # Log why we're skipping income transactions
+                    if account && String.starts_with?(account, "Income") do
+                      Logger.warning(
+                        "Skipping income transaction: account=#{inspect(account)}, amount=#{inspect(amount)}, date=#{inspect(date)}, effective_date=#{inspect(effective_date)}"
+                      )
+                    end
+
+                    []
+                  end
+                end)
+
+              {transactions_from_postings, effective_date || last_date}
+
+            is_map(entry) ->
+              # Direct posting entry
+              date = extract_date_from_entry(entry)
+              effective_date = date || last_date
+              account = extract_account_from_entry(entry)
+              amount = extract_amount_from_entry(entry)
+
+              # Log income transactions for debugging
+              if account && String.starts_with?(account, "Income") do
+                Logger.info(
+                  "Found income direct entry: account=#{inspect(account)}, amount=#{inspect(amount)}, date=#{inspect(date)}, effective_date=#{inspect(effective_date)}, has_date=#{!is_nil(effective_date)}, is_number=#{is_number(amount)}"
+                )
               end
-            end)
 
-          is_map(entry) ->
-            # Direct posting entry
-            date = extract_date_from_entry(entry)
-            account = extract_account_from_entry(entry)
-            amount = extract_amount_from_entry(entry)
+              if effective_date && account && is_number(amount) do
+                {[%{date: effective_date, account: account, amount: amount}], effective_date}
+              else
+                # Log why we're skipping income transactions
+                if account && String.starts_with?(account, "Income") do
+                  Logger.warning(
+                    "Skipping income direct entry: account=#{inspect(account)}, amount=#{inspect(amount)}, date=#{inspect(date)}, effective_date=#{inspect(effective_date)}"
+                  )
+                else
+                  Logger.debug(
+                    "Skipping entry: date=#{inspect(date)}, account=#{inspect(account)}, amount=#{inspect(amount)}"
+                  )
+                end
 
-            if date && account && is_number(amount) do
-              [%{date: date, account: account, amount: amount}]
-            else
-              Logger.debug(
-                "Skipping entry: date=#{inspect(date)}, account=#{inspect(account)}, amount=#{inspect(amount)}"
-              )
+                {[], last_date}
+              end
 
-              []
-            end
+            true ->
+              # Check if this might be an income entry we're missing
+              if is_map(entry) do
+                # Try to extract account to see if it's income
+                potential_account =
+                  cond do
+                    Map.has_key?(entry, "account") -> entry["account"]
+                    Map.has_key?(entry, "aname") -> entry["aname"]
+                    Map.has_key?(entry, "paccount") -> entry["paccount"]
+                    true -> nil
+                  end
 
-          true ->
-            Logger.debug("Unknown entry format: #{inspect(entry)}")
-            []
-        end
+                if potential_account && String.starts_with?(potential_account, "Income") do
+                  Logger.warning(
+                    "Found income entry in unknown format: #{inspect(Map.keys(entry))}, account=#{inspect(potential_account)}"
+                  )
+                end
+              end
+
+              Logger.debug("Unknown entry format: #{inspect(entry)}")
+              {[], last_date}
+          end
+
+        {acc_transactions ++ new_transactions, new_last_date}
       end)
+
+    transactions
 
     Logger.info("Extracted #{length(transactions)} transactions from register")
 
@@ -551,6 +622,41 @@ defmodule LedgerDashboard.Ledger.Parser do
       "Transaction breakdown: Income=#{income_count}, Expenses=#{expense_count}, Assets=#{asset_count}, Liabilities=#{liability_count}"
     )
 
+    # Count how many entries we processed vs how many transactions we extracted
+    entries_with_income_accounts =
+      entries
+      |> Enum.count(fn entry ->
+        # Check if this entry contains any income accounts
+        cond do
+          is_list(entry) and length(entry) >= 4 ->
+            posting = Enum.at(entry, 3)
+            if is_map(posting) do
+              account = extract_account_from_posting(posting)
+              account && String.starts_with?(account, "Income")
+            else
+              false
+            end
+
+          is_map(entry) and Map.has_key?(entry, "apostings") ->
+            entry["apostings"]
+            |> Enum.any?(fn posting ->
+              account = extract_account_from_posting(posting)
+              account && String.starts_with?(account, "Income")
+            end)
+
+          is_map(entry) ->
+            account = extract_account_from_entry(entry)
+            account && String.starts_with?(account, "Income")
+
+          true ->
+            false
+        end
+      end)
+
+    Logger.info(
+      "Found #{entries_with_income_accounts} register entries with Income accounts, but only extracted #{income_count} income transactions"
+    )
+
     if income_count > 0 do
       sample_income =
         Enum.find(transactions, fn t -> String.starts_with?(t.account, "Income") end)
@@ -561,20 +667,46 @@ defmodule LedgerDashboard.Ledger.Parser do
     {:ok, transactions}
   end
 
-  defp parse_hledger_register_array([date_str, _status, _description, posting, _balance])
+  defp parse_hledger_register_array([date_str, _status, _description, posting, _balance], last_date)
        when is_map(posting) do
-    date = parse_date(date_str)
+    require Logger
+
+    # Parse date from date_str, or use last_date if date_str is nil
+    # (hledger register only shows date on first posting of each transaction)
+    parsed_date =
+      if is_binary(date_str) do
+        parse_date(date_str)
+      else
+        nil
+      end
+
+    effective_date = parsed_date || last_date
+
     account = extract_account_from_posting(posting)
     amount = extract_amount_from_posting(posting)
 
-    if date && account && is_number(amount) do
-      [%{date: date, account: account, amount: amount}]
+    # Log income transactions for debugging
+    if account && String.starts_with?(account, "Income") do
+      Logger.info(
+        "Found income in array format: account=#{inspect(account)}, amount=#{inspect(amount)}, date_str=#{inspect(date_str)}, parsed_date=#{inspect(parsed_date)}, effective_date=#{inspect(effective_date)}, has_date=#{!is_nil(effective_date)}, is_number=#{is_number(amount)}"
+      )
+    end
+
+    if effective_date && account && is_number(amount) do
+      {[%{date: effective_date, account: account, amount: amount}], effective_date}
     else
-      []
+      # Log why we're skipping income transactions
+      if account && String.starts_with?(account, "Income") do
+        Logger.warning(
+          "Skipping income array entry: account=#{inspect(account)}, amount=#{inspect(amount)}, date_str=#{inspect(date_str)}, parsed_date=#{inspect(parsed_date)}, effective_date=#{inspect(effective_date)}"
+        )
+      end
+
+      {[], last_date}
     end
   end
 
-  defp parse_hledger_register_array(_), do: []
+  defp parse_hledger_register_array(_, last_date), do: {[], last_date}
 
   defp extract_account_from_posting(posting) when is_map(posting) do
     cond do

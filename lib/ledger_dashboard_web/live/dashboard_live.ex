@@ -376,21 +376,46 @@ defmodule LedgerDashboardWeb.DashboardLive do
             |> Enum.map(&abs(&1.amount))
             |> Enum.sum()
 
-          if income > 0 do
-            Logger.info("Date #{inspect(date)}: income=#{income}, expenses=#{expenses}")
-          end
+          # Calculate net worth change from income and expenses
+          # Income increases net worth, expenses decrease it
+          # This is more accurate than using asset/liability transactions because
+          # those include internal transfers which don't affect net worth
+          net_worth_change = income - expenses
 
-          {date, %{expenses: expenses, income: income}}
+
+          {date, %{expenses: expenses, income: income, net_worth_change: net_worth_change}}
         end)
         |> Enum.sort_by(fn {date, _} -> date end)
 
-      # Calculate running net worth (cumulative)
+      # Get initial net worth from summary (current net worth minus all changes)
+      # We'll calculate it backwards from the current net worth
+      total_net_worth_change =
+        daily_data
+        |> Enum.map(fn {_date, data} -> data.net_worth_change end)
+        |> Enum.sum()
+
+      total_income =
+        daily_data
+        |> Enum.map(fn {_date, data} -> data.income end)
+        |> Enum.sum()
+
+      total_expenses =
+        daily_data
+        |> Enum.map(fn {_date, data} -> data.expenses end)
+        |> Enum.sum()
+
+      initial_net_worth = (summary.net_worth || 0) - total_net_worth_change
+
+      Logger.info(
+        "Net worth calculation: initial=#{initial_net_worth}, current=#{summary.net_worth}, total_change=#{total_net_worth_change}, total_income=#{total_income}, total_expenses=#{total_expenses}, income-expenses=#{total_income - total_expenses}"
+      )
+
+      # Calculate running net worth (cumulative from initial)
       {dates, expenses_list, income_list, net_worth_list} =
         Enum.reduce(daily_data, {[], [], [], []}, fn {date, data},
                                                      {dates_acc, exp_acc, inc_acc, nw_acc} ->
-          net_change = data.income - data.expenses
-          previous_net_worth = List.first(nw_acc) || 0
-          new_net_worth = previous_net_worth + net_change
+          previous_net_worth = List.first(nw_acc) || initial_net_worth
+          new_net_worth = previous_net_worth + data.net_worth_change
 
           {
             [Date.to_string(date) | dates_acc],
