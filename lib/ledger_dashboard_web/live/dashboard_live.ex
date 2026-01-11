@@ -15,7 +15,18 @@ defmodule LedgerDashboardWeb.DashboardLive do
     case analysis_result do
       %AnalysisResult{} = result ->
         Storage.delete(session_id)
-        {:ok, assign(socket, :analysis_result, result)}
+        {date_min, date_max} = calculate_date_range(result.summary)
+
+        socket =
+          socket
+          |> assign(:analysis_result, result)
+          |> assign(:date_filter_start, date_min)
+          |> assign(:date_filter_end, date_max)
+          |> assign(:date_range_min, date_min)
+          |> assign(:date_range_max, date_max)
+          |> assign(:chart_update_counter, 0)
+
+        {:ok, socket}
 
       _ ->
         {:ok,
@@ -28,6 +39,26 @@ defmodule LedgerDashboardWeb.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
+    <!-- Sticky Filter Header -->
+    <div class="sticky top-0 z-50 bg-white border-b border-zinc-200 shadow-sm">
+      <div class="px-4 py-3 sm:px-6 lg:px-8 lg:max-w-7xl lg:mx-auto">
+        <.filter_header
+          start_date={@date_filter_start}
+          end_date={@date_filter_end}
+          min_date={@date_range_min}
+          max_date={@date_range_max}
+          has_active_filters={
+            has_active_filters?(
+              @date_filter_start,
+              @date_filter_end,
+              @date_range_min,
+              @date_range_max
+            )
+          }
+        />
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 gap-6 p-6 sm:gap-8 sm:p-8 lg:gap-12 lg:p-12 lg:max-w-7xl lg:mx-auto">
       <!-- Header -->
       <div class="col-span-1 mb-2">
@@ -43,11 +74,27 @@ defmodule LedgerDashboardWeb.DashboardLive do
       <div class="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:gap-8">
         <.summary_card
           label="Total Expenses"
-          value={format_number(@analysis_result.summary.total_expenses)}
+          value={
+            format_number(
+              calculate_filtered_summary(
+                @analysis_result.summary,
+                @date_filter_start,
+                @date_filter_end
+              ).total_expenses
+            )
+          }
         />
         <.summary_card
           label="Total Income"
-          value={format_number(@analysis_result.summary.total_income)}
+          value={
+            format_number(
+              calculate_filtered_summary(
+                @analysis_result.summary,
+                @date_filter_start,
+                @date_filter_end
+              ).total_income
+            )
+          }
         />
         <.summary_card
           label="Net Worth"
@@ -61,14 +108,18 @@ defmodule LedgerDashboardWeb.DashboardLive do
           title="Expense Breakdown"
           chart_type="sunburst"
           chart_id="expense-breakdown"
-          chart_data={expense_chart_data(@analysis_result.summary.expense_categories)}
+          chart_data={
+            expense_chart_data(@analysis_result.summary, @date_filter_start, @date_filter_end)
+          }
           linked_chart_id="expense-category-trends-over-time"
         />
         <.chart_card
           title="Income Breakdown"
           chart_type="sunburst"
           chart_id="income-breakdown"
-          chart_data={income_chart_data(@analysis_result.summary.income_categories)}
+          chart_data={
+            income_chart_data(@analysis_result.summary, @date_filter_start, @date_filter_end)
+          }
           linked_chart_id="income-category-trends-over-time"
         />
       </div>
@@ -79,14 +130,26 @@ defmodule LedgerDashboardWeb.DashboardLive do
           title="Expense Category Trends Over Time"
           chart_type="category_lines"
           chart_id="expense-category-trends-over-time"
-          chart_data={expense_category_trends_chart_data(@analysis_result.summary)}
+          chart_data={
+            expense_category_trends_chart_data(
+              @analysis_result.summary,
+              @date_filter_start,
+              @date_filter_end
+            )
+          }
           linked_chart_id="expense-breakdown"
         />
         <.chart_card
           title="Income Category Trends Over Time"
           chart_type="category_lines"
           chart_id="income-category-trends-over-time"
-          chart_data={income_category_trends_chart_data(@analysis_result.summary)}
+          chart_data={
+            income_category_trends_chart_data(
+              @analysis_result.summary,
+              @date_filter_start,
+              @date_filter_end
+            )
+          }
           linked_chart_id="income-breakdown"
         />
       </div>
@@ -96,7 +159,9 @@ defmodule LedgerDashboardWeb.DashboardLive do
         <.chart_card
           title="Trends Over Time"
           chart_type="line"
-          chart_data={trends_chart_data(@analysis_result.summary)}
+          chart_data={
+            trends_chart_data(@analysis_result.summary, @date_filter_start, @date_filter_end)
+          }
         />
       </div>
       
@@ -105,7 +170,13 @@ defmodule LedgerDashboardWeb.DashboardLive do
         <.chart_card
           title="Income vs Expenses by Month"
           chart_type="stacked_bar"
-          chart_data={monthly_comparison_chart_data(@analysis_result.summary)}
+          chart_data={
+            monthly_comparison_chart_data(
+              @analysis_result.summary,
+              @date_filter_start,
+              @date_filter_end
+            )
+          }
         />
       </div>
       
@@ -131,6 +202,61 @@ defmodule LedgerDashboardWeb.DashboardLive do
     """
   end
 
+  defp filter_header(assigns) do
+    ~H"""
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <.form
+        for={%{}}
+        phx-change="update_date_filter"
+        phx-debounce="300"
+        class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 flex-1"
+      >
+        <label class="text-xs font-medium text-zinc-700 sm:text-sm whitespace-nowrap">
+          Date Range:
+        </label>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 flex-1">
+          <div class="flex items-center gap-2">
+            <label for="date-start" class="text-xs text-zinc-600 sm:text-sm whitespace-nowrap">
+              Start
+            </label>
+            <input
+              type="date"
+              id="date-start"
+              name="date-start"
+              value={Date.to_string(@start_date)}
+              min={Date.to_string(@min_date)}
+              max={Date.to_string(@max_date)}
+              class="flex-1 min-w-0 text-xs sm:text-sm rounded-md border-zinc-300 shadow-sm focus:border-zinc-500 focus:ring-zinc-500 sm:max-w-[140px]"
+            />
+          </div>
+          <div class="flex items-center gap-2">
+            <label for="date-end" class="text-xs text-zinc-600 sm:text-sm whitespace-nowrap">
+              End
+            </label>
+            <input
+              type="date"
+              id="date-end"
+              name="date-end"
+              value={Date.to_string(@end_date)}
+              min={Date.to_string(@min_date)}
+              max={Date.to_string(@max_date)}
+              class="flex-1 min-w-0 text-xs sm:text-sm rounded-md border-zinc-300 shadow-sm focus:border-zinc-500 focus:ring-zinc-500 sm:max-w-[140px]"
+            />
+          </div>
+        </div>
+      </.form>
+      <button
+        :if={@has_active_filters}
+        type="button"
+        phx-click="clear_date_filters"
+        class="text-xs sm:text-sm font-medium text-zinc-700 hover:text-zinc-900 px-3 py-1.5 rounded-md border border-zinc-300 bg-white hover:bg-zinc-50 transition-colors whitespace-nowrap"
+      >
+        Clear Filters
+      </button>
+    </div>
+    """
+  end
+
   defp summary_card(assigns) do
     ~H"""
     <div class="overflow-hidden rounded-xl bg-white shadow-sm">
@@ -146,6 +272,147 @@ defmodule LedgerDashboardWeb.DashboardLive do
       </div>
     </div>
     """
+  end
+
+  @impl true
+  def handle_event(
+        "update_date_filter",
+        %{"date-start" => start_str, "date-end" => end_str},
+        socket
+      ) do
+    start_date = parse_date_or_default(start_str, socket.assigns.date_range_min)
+    end_date = parse_date_or_default(end_str, socket.assigns.date_range_max)
+
+    # Ensure start_date <= end_date
+    {final_start, final_end} =
+      if Date.compare(start_date, end_date) == :gt do
+        {end_date, start_date}
+      else
+        {start_date, end_date}
+      end
+
+    counter = (socket.assigns.chart_update_counter || 0) + 1
+
+    {:noreply,
+     socket
+     |> assign(:date_filter_start, final_start)
+     |> assign(:date_filter_end, final_end)
+     |> assign(:chart_update_counter, counter)}
+  end
+
+  def handle_event("update_date_filter", %{"date-start" => start_str}, socket) do
+    start_date = parse_date_or_default(start_str, socket.assigns.date_range_min)
+    end_date = socket.assigns.date_filter_end
+
+    # Ensure start_date <= end_date
+    {final_start, final_end} =
+      if Date.compare(start_date, end_date) == :gt do
+        {end_date, start_date}
+      else
+        {start_date, end_date}
+      end
+
+    counter = (socket.assigns.chart_update_counter || 0) + 1
+
+    {:noreply,
+     socket
+     |> assign(:date_filter_start, final_start)
+     |> assign(:date_filter_end, final_end)
+     |> assign(:chart_update_counter, counter)}
+  end
+
+  def handle_event("update_date_filter", %{"date-end" => end_str}, socket) do
+    start_date = socket.assigns.date_filter_start
+    end_date = parse_date_or_default(end_str, socket.assigns.date_range_max)
+
+    # Ensure start_date <= end_date
+    {final_start, final_end} =
+      if Date.compare(start_date, end_date) == :gt do
+        {end_date, start_date}
+      else
+        {start_date, end_date}
+      end
+
+    counter = (socket.assigns.chart_update_counter || 0) + 1
+
+    {:noreply,
+     socket
+     |> assign(:date_filter_start, final_start)
+     |> assign(:date_filter_end, final_end)
+     |> assign(:chart_update_counter, counter)}
+  end
+
+  def handle_event("clear_date_filters", _params, socket) do
+    counter = (socket.assigns.chart_update_counter || 0) + 1
+
+    {:noreply,
+     socket
+     |> assign(:date_filter_start, socket.assigns.date_range_min)
+     |> assign(:date_filter_end, socket.assigns.date_range_max)
+     |> assign(:chart_update_counter, counter)}
+  end
+
+  defp parse_date_or_default(date_str, default) when is_binary(date_str) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} -> date
+      _ -> default
+    end
+  end
+
+  defp parse_date_or_default(_date_str, default), do: default
+
+  defp has_active_filters?(start_date, end_date, min_date, max_date) do
+    Date.compare(start_date, min_date) != :eq or Date.compare(end_date, max_date) != :eq
+  end
+
+  defp calculate_date_range(summary) do
+    transactions = summary.transactions || []
+
+    if Enum.empty?(transactions) do
+      today = Date.utc_today()
+      {today, today}
+    else
+      dates = Enum.map(transactions, & &1.date)
+      {Enum.min(dates), Enum.max(dates)}
+    end
+  end
+
+  defp filter_transactions_by_date(transactions, start_date, end_date) do
+    require Logger
+    total_count = length(transactions)
+
+    filtered =
+      Enum.filter(transactions, fn transaction ->
+        date = transaction.date
+        Date.compare(date, start_date) != :lt and Date.compare(date, end_date) != :gt
+      end)
+
+    filtered_count = length(filtered)
+
+    Logger.info(
+      "filter_transactions_by_date: #{filtered_count}/#{total_count} transactions in range #{Date.to_string(start_date)} to #{Date.to_string(end_date)}"
+    )
+
+    filtered
+  end
+
+  defp calculate_filtered_summary(summary, start_date, end_date) do
+    transactions = summary.transactions || []
+    filtered_transactions = filter_transactions_by_date(transactions, start_date, end_date)
+
+    expenses =
+      filtered_transactions
+      |> Enum.filter(fn t -> String.starts_with?(t.account, "Expenses") end)
+      |> Enum.map(&abs(&1.amount))
+      |> Enum.sum()
+
+    income =
+      filtered_transactions
+      |> Enum.filter(fn t -> String.starts_with?(t.account, "Income") end)
+      |> Enum.map(&abs(&1.amount))
+      |> Enum.sum()
+
+    %{total_expenses: expenses, total_income: income}
   end
 
   defp format_number(nil), do: "0"
@@ -166,20 +433,37 @@ defmodule LedgerDashboardWeb.DashboardLive do
     linked_chart_id = assigns[:linked_chart_id]
     linked_sunburst_ids = assigns[:linked_sunburst_ids] || []
 
+    # Use update counter to force LiveView to detect changes
+    # This ensures the updated() callback fires when filters change
+    update_key = Map.get(assigns, :chart_update_counter, 0)
+
+    assigns =
+      assigns
+      |> assign(:chart_id_value, chart_id)
+      |> assign(:height_class_value, height_class)
+      |> assign(:linked_chart_id_value, linked_chart_id)
+      |> assign(:linked_sunburst_ids_value, linked_sunburst_ids)
+      |> assign(:data_hash, :erlang.phash2(assigns.chart_data))
+      |> assign(:update_key, update_key)
+
     ~H"""
     <div class="overflow-hidden rounded-xl bg-white shadow-sm">
       <div class="p-6 sm:p-8">
         <h3 class="text-base font-medium text-zinc-900 mb-4 sm:text-lg sm:mb-6">{@title}</h3>
         <div
-          id={chart_id}
+          id={@chart_id_value}
           phx-hook="Chart"
           data-chart-type={@chart_type}
           data-chart-data={Jason.encode!(@chart_data)}
-          data-linked-chart-id={if linked_chart_id, do: linked_chart_id, else: ""}
+          data-chart-hash={@data_hash}
+          data-update-key={@update_key}
+          data-linked-chart-id={if @linked_chart_id_value, do: @linked_chart_id_value, else: ""}
           data-linked-sunburst-ids={
-            if linked_sunburst_ids != [], do: Jason.encode!(linked_sunburst_ids), else: ""
+            if @linked_sunburst_ids_value != [],
+              do: Jason.encode!(@linked_sunburst_ids_value),
+              else: ""
           }
-          class={["w-full", height_class]}
+          class={["w-full", @height_class_value]}
         >
           <div
             class="chart-container w-full h-full rounded-lg overflow-hidden"
@@ -199,21 +483,53 @@ defmodule LedgerDashboardWeb.DashboardLive do
   defp get_chart_height("treemap"), do: "h-80 sm:h-96 lg:h-[28rem]"
   defp get_chart_height(_), do: "h-64 sm:h-80"
 
-  defp expense_chart_data(expense_categories) when is_list(expense_categories) do
-    # Build hierarchical tree structure for sunburst chart
-    tree = build_expense_hierarchy(expense_categories)
-    %{tree: tree}
+  defp expense_chart_data(summary, start_date, end_date) do
+    transactions = summary.transactions || []
+    filtered_transactions = filter_transactions_by_date(transactions, start_date, end_date)
+
+    expense_transactions =
+      filtered_transactions
+      |> Enum.filter(fn t -> String.starts_with?(t.account, "Expenses") end)
+
+    expense_categories =
+      expense_transactions
+      |> Enum.group_by(& &1.account)
+      |> Enum.map(fn {account, account_transactions} ->
+        amount = Enum.map(account_transactions, &abs(&1.amount)) |> Enum.sum()
+        %{full_path: account, amount: amount}
+      end)
+
+    if Enum.empty?(expense_categories) do
+      %{tree: %{name: "Expenses", value: 0, children: []}}
+    else
+      tree = build_expense_hierarchy(expense_categories)
+      %{tree: tree}
+    end
   end
 
-  defp expense_chart_data(_), do: %{tree: %{name: "Expenses", value: 0, children: []}}
+  defp income_chart_data(summary, start_date, end_date) do
+    transactions = summary.transactions || []
+    filtered_transactions = filter_transactions_by_date(transactions, start_date, end_date)
 
-  defp income_chart_data(income_categories) when is_list(income_categories) do
-    # Build hierarchical tree structure for sunburst chart
-    tree = build_income_hierarchy(income_categories)
-    %{tree: tree}
+    income_transactions =
+      filtered_transactions
+      |> Enum.filter(fn t -> String.starts_with?(t.account, "Income") end)
+
+    income_categories =
+      income_transactions
+      |> Enum.group_by(& &1.account)
+      |> Enum.map(fn {account, account_transactions} ->
+        amount = Enum.map(account_transactions, &abs(&1.amount)) |> Enum.sum()
+        %{full_path: account, amount: amount}
+      end)
+
+    if Enum.empty?(income_categories) do
+      %{tree: %{name: "Income", value: 0, children: []}}
+    else
+      tree = build_income_hierarchy(income_categories)
+      %{tree: tree}
+    end
   end
-
-  defp income_chart_data(_), do: %{tree: %{name: "Income", value: 0, children: []}}
 
   defp build_expense_hierarchy(categories) do
     # Build a tree from flat categories like "Expenses:Food:Groceries" -> {Food: {Groceries: amount}}
@@ -348,18 +664,19 @@ defmodule LedgerDashboardWeb.DashboardLive do
     }
   end
 
-  defp trends_chart_data(summary) do
+  defp trends_chart_data(summary, start_date, end_date) do
     require Logger
     transactions = summary.transactions || []
-    Logger.info("trends_chart_data: #{length(transactions)} transactions")
+    filtered_transactions = filter_transactions_by_date(transactions, start_date, end_date)
+    Logger.info("trends_chart_data: #{length(filtered_transactions)} transactions")
 
-    if Enum.empty?(transactions) do
+    if Enum.empty?(filtered_transactions) do
       Logger.warning("No transactions available for trends chart")
       %{dates: [], expenses: [], income: [], net_worth: []}
     else
       # Log sample transactions to debug
       income_transactions =
-        Enum.filter(transactions, fn t -> String.starts_with?(t.account, "Income") end)
+        Enum.filter(filtered_transactions, fn t -> String.starts_with?(t.account, "Income") end)
 
       Logger.info("Found #{length(income_transactions)} income transactions")
 
@@ -373,7 +690,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
 
       # Group transactions by date and calculate daily totals
       daily_data =
-        transactions
+        filtered_transactions
         |> Enum.group_by(& &1.date)
         |> Enum.map(fn {date, day_transactions} ->
           expenses =
@@ -441,18 +758,19 @@ defmodule LedgerDashboardWeb.DashboardLive do
     end
   end
 
-  defp monthly_comparison_chart_data(summary) do
+  defp monthly_comparison_chart_data(summary, start_date, end_date) do
     require Logger
     transactions = summary.transactions || []
-    Logger.info("monthly_comparison_chart_data: #{length(transactions)} transactions")
+    filtered_transactions = filter_transactions_by_date(transactions, start_date, end_date)
+    Logger.info("monthly_comparison_chart_data: #{length(filtered_transactions)} transactions")
 
-    if Enum.empty?(transactions) do
+    if Enum.empty?(filtered_transactions) do
       Logger.warning("No transactions available for monthly comparison chart")
       %{months: [], income: [], expenses: []}
     else
       # Group transactions by month
       monthly_data =
-        transactions
+        filtered_transactions
         |> Enum.group_by(fn t -> {t.date.year, t.date.month} end)
         |> Enum.map(fn {{year, month}, month_transactions} ->
           expenses =
@@ -521,13 +839,14 @@ defmodule LedgerDashboardWeb.DashboardLive do
 
   defp build_asset_liability_tree(_value, _name), do: %{name: "No Data", value: 0}
 
-  defp expense_category_trends_chart_data(summary) do
+  defp expense_category_trends_chart_data(summary, start_date, end_date) do
     require Logger
     transactions = summary.transactions || []
+    filtered_transactions = filter_transactions_by_date(transactions, start_date, end_date)
 
     # Filter to only include Expenses accounts (exclude Assets, Liabilities, Income)
     expense_transactions =
-      transactions
+      filtered_transactions
       |> Enum.filter(fn t -> String.starts_with?(t.account, "Expenses") end)
 
     Logger.info(
@@ -542,13 +861,14 @@ defmodule LedgerDashboardWeb.DashboardLive do
     end
   end
 
-  defp income_category_trends_chart_data(summary) do
+  defp income_category_trends_chart_data(summary, start_date, end_date) do
     require Logger
     transactions = summary.transactions || []
+    filtered_transactions = filter_transactions_by_date(transactions, start_date, end_date)
 
     # Filter to only include Income accounts (exclude Assets, Liabilities, Expenses)
     income_transactions =
-      transactions
+      filtered_transactions
       |> Enum.filter(fn t -> String.starts_with?(t.account, "Income") end)
 
     Logger.info(

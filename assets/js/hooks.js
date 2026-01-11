@@ -327,18 +327,60 @@ export const ChartHook = {
       this.chart.dispose()
     }
 
-    this.chart = echarts.init(container)
-    const option = this.getChartConfig(chartType, chartData, this)
-    this.chart.setOption(option)
+    try {
+      this.chart = echarts.init(container)
+      const option = this.getChartConfig(chartType, chartData, this)
+      
+      console.log(`Initializing chart ${this.chartId} (${chartType}):`, {
+        containerSize: `${container.clientWidth}x${container.clientHeight}`,
+        hasOption: !!option,
+        hasSeries: !!option?.series,
+        seriesCount: Array.isArray(option?.series) ? option.series.length : 0,
+        option: option
+      })
+      
+      // Validate option before setting
+      if (!option || !option.series) {
+        console.error(`Invalid chart option for ${this.chartId}:`, option)
+        return
+      }
+      
+      // Validate series data
+      if (Array.isArray(option.series)) {
+        option.series.forEach((s, idx) => {
+          if (!s.data || !Array.isArray(s.data)) {
+            console.warn(`Series ${idx} for ${this.chartId} has invalid data:`, s)
+          } else {
+            console.log(`Series ${idx} (${s.name}) has ${s.data.length} data points`)
+          }
+        })
+      }
+      
+      this.chart.setOption(option)
+      console.log(`Chart ${this.chartId} initialized successfully`)
+    } catch (error) {
+      console.error(`Error initializing chart ${this.chartId}:`, error)
+      console.error(`Chart type: ${chartType}, Data:`, chartData)
+      return
+    }
     
     // Register chart for linking
     if (this.chartId) {
-      chartRegistry.set(this.chartId, {
+      const dataHash = this.el.dataset.chartHash
+      const updateKey = this.el.dataset.updateKey
+      const registryEntry = {
         chart: this.chart,
         hook: this,
         type: chartType,
-        data: chartData
-      })
+        data: chartData,
+        dataHash: dataHash,
+        updateKey: updateKey
+      }
+      // For sunburst charts, store originalData so brush selections can restore it
+      if (chartType === "sunburst" && chartData.tree) {
+        registryEntry.originalData = chartData
+      }
+      chartRegistry.set(this.chartId, registryEntry)
     }
 
     // Handle legend click to update borderRadius when series visibility changes
@@ -399,29 +441,228 @@ export const ChartHook = {
   updated() {
     const container = this.el.querySelector(".chart-container")
     if (!container) {
+      console.warn(`Chart container not found for ${this.chartId}`)
       return
     }
 
     const chartData = JSON.parse(this.el.dataset.chartData || "{}")
     const chartType = this.el.dataset.chartType
+    const newDataHash = this.el.dataset.chartHash
+    const updateKey = this.el.dataset.updateKey
 
     // If chart doesn't exist or was disposed, re-initialize
     if (!this.chart || this.chart.isDisposed()) {
+      console.log(`Re-initializing chart ${this.chartId} (chart was disposed or doesn't exist)`)
       requestAnimationFrame(() => {
         this.initializeChart(container, chartType, chartData)
       })
-    } else {
-      // Update existing chart
-      const option = this.getChartConfig(chartType, chartData, this)
-      // Use replaceMerge to ensure borderRadius is properly updated when series visibility changes
-      this.chart.setOption(option, { replaceMerge: ['series'] })
+      return
+    }
+
+    // Check if data actually changed by comparing hash and update key
+    const registryEntry = this.chartId ? chartRegistry.get(this.chartId) : null
+    const oldDataHash = registryEntry?.dataHash
+    const oldUpdateKey = registryEntry?.updateKey
+    const dataChanged = newDataHash && newDataHash !== oldDataHash
+    
+    // Convert to strings for comparison since dataset values are always strings
+    const updateKeyStr = String(updateKey || "")
+    const oldUpdateKeyStr = String(oldUpdateKey || "")
+    const updateKeyChanged = updateKeyStr && updateKeyStr !== oldUpdateKeyStr
+    
+    console.log(`Chart ${this.chartId} update check:`, {
+      oldDataHash,
+      newDataHash,
+      dataChanged,
+      oldUpdateKey: oldUpdateKeyStr,
+      updateKey: updateKeyStr,
+      updateKeyChanged
+    })
+
+    // If update key changed (filter change), clear and re-set the chart
+    // This is the most reliable way to handle filter changes
+    if (updateKeyChanged) {
+      console.log(`Update key changed for ${this.chartId} (${oldUpdateKey} -> ${updateKey}), updating chart`)
       
-      // Update stored data
-      if (this.chartId) {
-        const registryEntry = chartRegistry.get(this.chartId)
-        if (registryEntry) {
-          registryEntry.data = chartData
+      // Get the new chart configuration
+      const option = this.getChartConfig(chartType, chartData, this)
+      
+      // Validate option before setting
+      if (!option || !option.series) {
+        console.warn(`Invalid chart option for ${this.chartId}:`, option)
+        return
+      }
+      
+      // Clear the chart and set new option - this keeps the instance alive
+      // but ensures a clean state
+      if (this.chart && !this.chart.isDisposed()) {
+        this.chart.clear()
+        this.chart.setOption(option, { notMerge: true, lazyUpdate: false })
+        
+        // Force resize
+        requestAnimationFrame(() => {
+          if (this.chart && !this.chart.isDisposed()) {
+            this.chart.resize()
+          }
+        })
+        
+        // Update stored data in registry
+        if (this.chartId) {
+          if (!registryEntry) {
+            // Create new registry entry if it doesn't exist
+            chartRegistry.set(this.chartId, {
+              chart: this.chart,
+              hook: this,
+              type: chartType,
+              data: chartData,
+              dataHash: newDataHash,
+              updateKey: updateKey
+            })
+          } else {
+            registryEntry.data = chartData
+            registryEntry.dataHash = newDataHash
+            registryEntry.updateKey = updateKey
+          }
+          
+          // For sunburst charts, also update originalData so brush selections work with filtered data
+          const entry = chartRegistry.get(this.chartId)
+          if (entry && chartType === "sunburst" && chartData.tree) {
+            entry.originalData = chartData
+          }
         }
+      } else {
+        // Chart doesn't exist, initialize it
+        requestAnimationFrame(() => {
+          this.initializeChart(container, chartType, chartData)
+        })
+      }
+      return
+    }
+
+    // If data hash changed (but update key didn't), do a full reset
+    // This ensures charts don't go blank when data structure changes significantly
+    if (dataChanged || !oldDataHash) {
+      console.log(`Data changed for ${this.chartId}, updating chart (oldHash: ${oldDataHash}, newHash: ${newDataHash})`)
+      console.log(`Chart data for ${this.chartId}:`, chartData)
+      
+      // Get the new chart configuration
+      const option = this.getChartConfig(chartType, chartData, this)
+      console.log(`Chart option for ${this.chartId}:`, option)
+      
+      // Validate option before setting
+      if (!option || !option.series) {
+        console.warn(`Invalid chart option for ${this.chartId}:`, option)
+        return
+      }
+      
+      // Check container dimensions and visibility
+      const containerWidth = container.clientWidth
+      const containerHeight = container.clientHeight
+      const containerStyle = window.getComputedStyle(container)
+      const isVisible = containerStyle.display !== 'none' && 
+                       containerStyle.visibility !== 'hidden' &&
+                       containerStyle.opacity !== '0'
+      
+      console.log(`Container dimensions for ${this.chartId}: ${containerWidth}x${containerHeight}, visible: ${isVisible}`)
+      
+      // If container has no dimensions, wait and retry
+      if (containerWidth === 0 || containerHeight === 0) {
+        console.warn(`Container has no dimensions for ${this.chartId}, retrying...`)
+        setTimeout(() => {
+          this.updated()
+        }, 100)
+        return
+      }
+      
+      if (!isVisible) {
+        console.warn(`Container is not visible for ${this.chartId}, retrying...`)
+        setTimeout(() => {
+          this.updated()
+        }, 100)
+        return
+      }
+      
+      // Use setOption with notMerge for a clean update
+      // Don't use clear() as it might be too aggressive
+      if (this.chart && !this.chart.isDisposed()) {
+        try {
+          console.log(`Updating chart ${this.chartId} with setOption (notMerge: true)`)
+          console.log(`Chart state before update:`, {
+            isDisposed: this.chart.isDisposed(),
+            containerSize: `${container.clientWidth}x${container.clientHeight}`,
+            optionSeriesCount: Array.isArray(option?.series) ? option.series.length : 0,
+            xAxisDataLength: option?.xAxis?.data?.length || 0
+          })
+          
+          // Replace all components to ensure a complete update
+          // Using replaceMerge with all components is more reliable than notMerge
+          const replaceComponents = ['series', 'xAxis', 'yAxis', 'tooltip', 'legend', 'grid', 'brush', 'color']
+          this.chart.setOption(option, { replaceMerge: replaceComponents, lazyUpdate: false })
+          console.log(`Chart ${this.chartId} option set with replaceMerge: ${replaceComponents.join(', ')}`)
+          
+          // Force resize and render immediately
+          this.chart.resize()
+          
+          // Also try rendering explicitly after a short delay
+          setTimeout(() => {
+            if (this.chart && !this.chart.isDisposed()) {
+              this.chart.resize()
+              console.log(`Chart ${this.chartId} resized (delayed)`)
+              
+              // Check if chart actually has content after update
+              const currentOption = this.chart.getOption()
+              const hasContent = currentOption.series && 
+                                 Array.isArray(currentOption.series) && 
+                                 currentOption.series.length > 0 &&
+                                 currentOption.series.some(s => s.data && s.data.length > 0)
+              
+              console.log(`Chart ${this.chartId} after update:`, {
+                hasSeries: !!currentOption.series,
+                seriesCount: Array.isArray(currentOption.series) ? currentOption.series.length : 0,
+                hasContent: hasContent,
+                xAxisData: currentOption.xAxis?.[0]?.data?.length || 0,
+                // Check if chart DOM element has any SVG/canvas children
+                hasRenderedContent: container.querySelector('canvas, svg') !== null
+              })
+              
+              if (!hasContent) {
+                console.warn(`Chart ${this.chartId} appears to have no content after update!`)
+              }
+              
+              if (!container.querySelector('canvas, svg')) {
+                console.error(`Chart ${this.chartId} has no rendered content (no canvas/svg found)!`)
+                // Try re-initializing if no rendered content
+                console.log(`Attempting to re-initialize chart ${this.chartId}`)
+                this.chart.dispose()
+                this.chart = null
+                this.initializeChart(container, chartType, chartData)
+              }
+            }
+          }, 50)
+        } catch (error) {
+          console.error(`Error updating chart ${this.chartId}:`, error)
+          console.error(`Error stack:`, error.stack)
+          // If update fails, try re-initializing
+          this.chart.dispose()
+          this.chart = null
+          requestAnimationFrame(() => {
+            const currentContainer = this.el.querySelector(".chart-container")
+            if (currentContainer) {
+              this.initializeChart(currentContainer, chartType, chartData)
+            }
+          })
+        }
+      } else {
+        console.log(`Chart ${this.chartId} doesn't exist or is disposed, initializing`)
+        // Chart doesn't exist, initialize it
+        requestAnimationFrame(() => {
+          const currentContainer = this.el.querySelector(".chart-container")
+          if (currentContainer) {
+            this.initializeChart(currentContainer, chartType, chartData)
+          } else {
+            console.error(`Container not found for ${this.chartId}`)
+          }
+        })
       }
     }
   },
@@ -600,10 +841,68 @@ export const ChartHook = {
     }
 
     if (chartType === "line") {
+      const dates = data.dates || []
+      const expenses = data.expenses || []
+      const income = data.income || []
+      const netWorth = data.net_worth || []
+      
+      // Handle empty data case
+      if (dates.length === 0) {
+        return {
+          xAxis: {
+            type: "category",
+            data: ["No data in selected range"],
+            boundaryGap: false,
+          },
+          yAxis: {
+            type: "value",
+            axisLabel: {
+              formatter: function (value) {
+                return "$" + value.toFixed(2)
+              },
+            },
+          },
+          series: [
+            {
+              name: "Expenses",
+              type: "line",
+              data: [0],
+              itemStyle: { color: tailwindRed[0] },
+              lineStyle: { color: tailwindRed[0] },
+              smooth: true,
+            },
+            {
+              name: "Income",
+              type: "line",
+              data: [0],
+              itemStyle: { color: tailwindBlue[0] },
+              lineStyle: { color: tailwindBlue[0] },
+              smooth: true,
+            },
+            {
+              name: "Net Worth",
+              type: "line",
+              data: [0],
+              itemStyle: { color: tailwindSlate[1] },
+              lineStyle: { color: tailwindSlate[1] },
+              smooth: true,
+            },
+          ],
+          tooltip: {
+            trigger: "axis",
+          },
+        }
+      }
+      
+      // Ensure all data arrays match dates length
+      const paddedExpenses = dates.map((_, i) => expenses[i] || 0)
+      const paddedIncome = dates.map((_, i) => income[i] || 0)
+      const paddedNetWorth = dates.map((_, i) => netWorth[i] || 0)
+      
       return {
         xAxis: {
           type: "category",
-          data: data.dates || [],
+          data: dates,
           boundaryGap: false,
         },
         yAxis: {
@@ -618,7 +917,7 @@ export const ChartHook = {
           {
             name: "Expenses",
             type: "line",
-            data: data.expenses || [],
+            data: paddedExpenses,
             itemStyle: { color: tailwindRed[0] }, // red-500
             lineStyle: { color: tailwindRed[0] },
             smooth: true,
@@ -626,7 +925,7 @@ export const ChartHook = {
           {
             name: "Income",
             type: "line",
-            data: data.income || [],
+            data: paddedIncome,
             itemStyle: { color: tailwindBlue[0] }, // blue-500
             lineStyle: { color: tailwindBlue[0] },
             smooth: true,
@@ -634,7 +933,7 @@ export const ChartHook = {
           {
             name: "Net Worth",
             type: "line",
-            data: data.net_worth || [],
+            data: paddedNetWorth,
             itemStyle: { color: tailwindSlate[1] }, // slate-600
             lineStyle: { color: tailwindSlate[1] },
             smooth: true,
@@ -669,14 +968,66 @@ export const ChartHook = {
         return isLast ? [8, 8, 0, 0] : [0, 0, 0, 0]
       }
       
+      const months = data.months || []
       const incomeData = data.income || []
       const expensesData = data.expenses || []
       const totalSeries = 2 // Income and Expenses
       
+      // Handle empty data case
+      if (months.length === 0) {
+        return {
+          xAxis: {
+            type: "category",
+            data: ["No data in selected range"],
+          },
+          yAxis: {
+            type: "value",
+            axisLabel: {
+              formatter: function (value) {
+                return "$" + value.toFixed(2)
+              },
+            },
+          },
+          series: [
+            {
+              name: "Income",
+              type: "bar",
+              stack: "total",
+              data: [0],
+              itemStyle: {
+                color: tailwindBlue[0],
+                borderRadius: [8, 8, 0, 0],
+              },
+            },
+            {
+              name: "Expenses",
+              type: "bar",
+              stack: "total",
+              data: [0],
+              itemStyle: {
+                color: tailwindRed[0],
+                borderRadius: [0, 0, 0, 0],
+              },
+            },
+          ],
+          tooltip: {
+            trigger: "axis",
+          },
+          legend: {
+            data: ["Income", "Expenses"],
+            top: 10,
+          },
+        }
+      }
+      
+      // Ensure data arrays match months length
+      const paddedIncome = months.map((_, i) => incomeData[i] || 0)
+      const paddedExpenses = months.map((_, i) => expensesData[i] || 0)
+      
       return {
         xAxis: {
           type: "category",
-          data: data.months || [],
+          data: months,
         },
         yAxis: {
           type: "value",
@@ -691,7 +1042,7 @@ export const ChartHook = {
             name: "Income",
             type: "bar",
             stack: "total",
-            data: incomeData.map((val) => {
+            data: paddedIncome.map((val) => {
               return {
                 value: val,
                 itemStyle: {
@@ -705,7 +1056,7 @@ export const ChartHook = {
             name: "Expenses",
             type: "bar",
             stack: "total",
-            data: expensesData.map((val) => {
+            data: paddedExpenses.map((val) => {
               return {
                 value: val,
                 itemStyle: {
@@ -738,13 +1089,48 @@ export const ChartHook = {
       const series = data.series || []
       const transactions = data.transactions || []
       
+      // Handle empty data case
+      if (dates.length === 0 || series.length === 0) {
+        // Return a minimal valid config for empty data
+        return {
+          xAxis: {
+            type: "category",
+            data: ["No data in selected range"],
+            boundaryGap: false,
+          },
+          yAxis: {
+            type: "value",
+            axisLabel: {
+              formatter: function (value) {
+                return "$" + value.toFixed(2)
+              },
+            },
+          },
+          series: [],
+          tooltip: {
+            trigger: "axis",
+          },
+          grid: {
+            left: "3%",
+            right: "4%",
+            bottom: "15%",
+            top: "15%",
+            containLabel: true,
+          },
+        }
+      }
+      
       // Generate colors for each category using the positive palette
       const categorySeries = series.map((cat, index) => {
         const color = positivePalette[index % positivePalette.length]
+        // Ensure data array matches dates length
+        const catData = cat.data || []
+        const paddedData = dates.map((_, i) => catData[i] || 0)
+        
         return {
           name: cat.name,
           type: "line",
-          data: cat.data || [],
+          data: paddedData,
           smooth: true,
           itemStyle: { color: color },
           lineStyle: { color: color, width: 2 },
