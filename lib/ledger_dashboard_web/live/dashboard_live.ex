@@ -19,6 +19,7 @@ defmodule LedgerDashboardWeb.DashboardLive do
 
         socket =
           socket
+          |> clear_flash()
           |> assign(:analysis_result, result)
           |> assign(:date_filter_start, date_min)
           |> assign(:date_filter_end, date_max)

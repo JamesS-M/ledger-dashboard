@@ -10,6 +10,7 @@ defmodule LedgerDashboardWeb.UploadLive do
   def mount(_params, session, socket) do
     socket =
       socket
+      |> clear_flash()
       |> assign(:error, nil)
       |> assign(:session_id, Map.get(session, "_csrf_token", inspect(self())))
       |> allow_upload(:ledger,
